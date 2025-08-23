@@ -8,9 +8,9 @@ from langchain_core.tools import tool # type: ignore
 import requests # type: ignore
 import json
 
-from config import DEFAULT_USER_ID, PORTFOLIO, WATCHLIST, DOC_CACHE, WATCHLIST_API_URL
+from config import DEFAULT_USER_ID, PORTFOLIO, WATCHLIST, DOC_CACHE, WATCHLIST_API_URL, PORTFOLIO_API_URL
 from models import (
-    AddPortfolioInput, RemovePortfolioInput, ListPortfolioInput,
+    AddPortfolioInput, RemovePortfolioInput, ListPortfolioInput, GetPortfolioSummaryInput,
     AddWatchlistInput, RemoveWatchlistInput, ListWatchlistInput, GetWatchlistEntryInput,
     GetNewsInput, WebSearchInput
 )
@@ -27,10 +27,10 @@ def _wl(user_id: str):
 # ====== Portfolio Tools ======
 @tool("add_to_portfolio", args_schema=AddPortfolioInput)
 def add_to_portfolio(user_id: str = DEFAULT_USER_ID, ticker: str = "",
-                     weight: Optional[float] = None, note: Optional[str] = None):
-    """Add or upsert a holding in the user's portfolio."""
+                     quantity: str = "", buy_price: str = "", note: Optional[str] = None):
+    """Add or upsert a holding in the user's portfolio by calling the portfolio API."""
     try:
-        print(f"[LOG] add_to_portfolio called with user_id={user_id}, ticker={ticker}, weight={weight}, note={note}")
+        print(f"[LOG] add_to_portfolio called with user_id={user_id}, ticker={ticker}, quantity={quantity}, buy_price={buy_price}, note={note}")
         
         # Validate inputs
         if not ticker or not ticker.strip():
@@ -41,39 +41,98 @@ def add_to_portfolio(user_id: str = DEFAULT_USER_ID, ticker: str = "",
             print(f"[LOG] Validation failed: user_id is empty")
             return {"ok": False, "error": "User ID cannot be empty"}
         
+        if not quantity or not quantity.strip():
+            print(f"[LOG] Validation failed: quantity is empty")
+            return {"ok": False, "error": "Quantity cannot be empty. Please specify the number of shares."}
+        
+        if not buy_price or not buy_price.strip():
+            print(f"[LOG] Validation failed: buy_price is empty")
+            return {"ok": False, "error": "Buy price cannot be empty. Please specify the purchase price per share."}
+        
         ticker = ticker.strip().upper()
         user_id = user_id.strip()
+        quantity = quantity.strip()
+        buy_price = buy_price.strip()
         
-        # Validate weight if provided
-        if weight is not None and (weight < 0 or weight > 100):
-            print(f"[LOG] Validation failed: weight is invalid ({weight})")
-            return {"ok": False, "error": "Weight must be between 0 and 100"}
+        # Validate quantity format (should be a positive number)
+        try:
+            qty_float = float(quantity)
+            if qty_float <= 0:
+                print(f"[LOG] Validation failed: quantity must be positive ({quantity})")
+                return {"ok": False, "error": "Quantity must be a positive number"}
+        except ValueError:
+            print(f"[LOG] Validation failed: quantity is not a valid number ({quantity})")
+            return {"ok": False, "error": "Quantity must be a valid number"}
         
-        pf = _pf(user_id)
-        existed = ticker in pf
+        # Validate buy_price format (should be a positive number)
+        try:
+            price_float = float(buy_price)
+            if price_float <= 0:
+                print(f"[LOG] Validation failed: buy_price must be positive ({buy_price})")
+                return {"ok": False, "error": "Buy price must be a positive number"}
+        except ValueError:
+            print(f"[LOG] Validation failed: buy_price is not a valid number ({buy_price})")
+            return {"ok": False, "error": "Buy price must be a valid number"}
         
-        pf[ticker] = {"weight": weight, "note": note}
+        print(f"[LOG] Making API request to add {ticker} to portfolio for user {user_id}")
         
-        # Verify the entry was actually added
-        if ticker in pf:
-            print(f"[LOG] Successfully added {ticker} to portfolio")
+        # Make HTTP request to the portfolio API
+        payload = {
+            "user_id": user_id,
+            "ticker": ticker,
+            "quantity": quantity,
+            "buy_price": buy_price,
+            "note": note
+        }
+        
+        print(f"[LOG] API payload: {payload}")
+        response = requests.post(PORTFOLIO_API_URL, json=payload, headers={"Content-Type": "application/json"}, timeout=10)
+        print(f"[LOG] API response status: {response.status_code}")
+        
+        if response.status_code in [200, 201]:  # 200 OK, 201 Created
+            result = response.json()
+            print(f"[LOG] API response success: {result}")
             return {
-                "ok": True, 
-                "message": f"{'Updated' if existed else 'Added'} {ticker} in portfolio",
-                "portfolio": pf,
-                "portfolio_count": len(pf)
+                "ok": True,
+                "message": f"Successfully added {ticker} to portfolio",
+                "api_response": result
             }
+        elif response.status_code == 400:
+            result = response.json()
+            print(f"[LOG] API response error 400: {result}")
+            return {"ok": False, "error": result.get("detail", "Unable to add ticker to portfolio")}
         else:
-            print(f"[LOG] Failed to add ticker {ticker} to portfolio")
-            return {"ok": False, "error": "Failed to add ticker to portfolio"}
+            print(f"[LOG] API response unexpected status: {response.status_code}")
+            return {"ok": False, "error": "Unable to add ticker to portfolio at this time"}
             
+    except requests.exceptions.ConnectionError:
+        print(f"[LOG] Connection error to API - falling back to local storage")
+        # Fallback to local storage
+        local_portfolio = _pf(user_id)
+        local_portfolio[ticker] = {"quantity": quantity, "buy_price": buy_price, "note": note, "added_at": "local_fallback"}
+        print(f"[LOG] Successfully added {ticker} to local portfolio")
+        return {
+            "ok": True,
+            "message": f"Successfully added {ticker} to local portfolio (external API unavailable)",
+            "source": "local_fallback",
+            "note": "External API unavailable, data stored locally"
+        }
     except Exception as e:
-        print(f"[LOG] Error adding to portfolio: {str(e)}")
-        return {"ok": False, "error": f"Error adding to portfolio: {str(e)}"}
+        print(f"[LOG] Unexpected error: {str(e)} - falling back to local storage")
+        # Fallback to local storage
+        local_portfolio = _pf(user_id)
+        local_portfolio[ticker] = {"quantity": quantity, "buy_price": buy_price, "note": note, "added_at": "local_fallback"}
+        print(f"[LOG] Successfully added {ticker} to local portfolio")
+        return {
+            "ok": True,
+            "message": f"Successfully added {ticker} to local portfolio (external API error)",
+            "source": "local_fallback",
+            "note": "External API error, data stored locally"
+        }
 
 @tool("remove_from_portfolio", args_schema=RemovePortfolioInput)
 def remove_from_portfolio(user_id: str = DEFAULT_USER_ID, ticker: str = ""):
-    """Remove a holding from the user's portfolio."""
+    """Remove a holding from the user's portfolio by calling the portfolio API."""
     try:
         print(f"[LOG] remove_from_portfolio called with user_id={user_id}, ticker={ticker}")
         
@@ -89,30 +148,80 @@ def remove_from_portfolio(user_id: str = DEFAULT_USER_ID, ticker: str = ""):
         ticker = ticker.strip().upper()
         user_id = user_id.strip()
         
-        pf = _pf(user_id)
-        existed = ticker in pf
+        print(f"[LOG] Getting portfolio for user {user_id} to find entry for {ticker}")
         
-        if existed:
-            pf.pop(ticker)
-            print(f"[LOG] Successfully removed {ticker} from portfolio")
+        # First, get the portfolio to find the entry ID
+        list_url = f"{PORTFOLIO_API_URL}?user_id={user_id}&ticker={ticker}"
+        list_response = requests.get(list_url, timeout=10)
+        print(f"[LOG] List API response status: {list_response.status_code}")
+        
+        if list_response.status_code != 200:
+            print(f"[LOG] Failed to get portfolio")
+            return {"ok": False, "error": "Unable to remove ticker from portfolio"}
+        
+        list_data = list_response.json()
+        entry_id = None
+        
+        # Find the entry with matching ticker - handle both "portfolios" and "items" fields
+        items = list_data.get("items", list_data.get("portfolios", []))
+        for item in items:
+            if item.get("ticker") == ticker:
+                entry_id = item.get("id") or item.get("portfolio_id")
+                break
+        
+        if not entry_id:
+            print(f"[LOG] Entry not found for ticker {ticker}")
+            return {"ok": False, "error": f"Ticker {ticker} not found in portfolio"}
+        
+        print(f"[LOG] Found entry ID {entry_id}, deleting...")
+        
+        # Delete the entry
+        delete_url = f"{PORTFOLIO_API_URL.rstrip('/')}/{entry_id}"
+        delete_response = requests.delete(delete_url, timeout=10)
+        print(f"[LOG] Delete API response status: {delete_response.status_code}")
+        
+        if delete_response.status_code == 200:
+            print(f"[LOG] Successfully deleted entry {entry_id}")
             return {
-                "ok": True, 
-                "message": f"Successfully removed {ticker} from portfolio",
-                "removed": True, 
-                "portfolio": pf,
-                "portfolio_count": len(pf)
+                "ok": True,
+                "message": f"Successfully removed {ticker} from portfolio"
             }
         else:
-            print(f"[LOG] Ticker {ticker} not found in portfolio")
-            return {"ok": False, "error": f"Ticker {ticker} not found in portfolio"}
+            print(f"[LOG] Failed to delete entry")
+            return {"ok": False, "error": "Unable to remove ticker from portfolio"}
             
+    except requests.exceptions.ConnectionError:
+        print(f"[LOG] Connection error to API - falling back to local storage")
+        # Fallback to local storage
+        local_portfolio = _pf(user_id)
+        if ticker in local_portfolio:
+            local_portfolio.pop(ticker)
+            print(f"[LOG] Successfully removed {ticker} from local portfolio")
+            return {
+                "ok": True,
+                "message": f"Successfully removed {ticker} from local portfolio (external API unavailable)",
+                "source": "local_fallback"
+            }
+        else:
+            return {"ok": False, "error": f"Ticker {ticker} not found in local portfolio"}
     except Exception as e:
-        print(f"[LOG] Error removing from portfolio: {str(e)}")
-        return {"ok": False, "error": f"Error removing from portfolio: {str(e)}"}
+        print(f"[LOG] Unexpected error: {str(e)} - falling back to local storage")
+        # Fallback to local storage
+        local_portfolio = _pf(user_id)
+        if ticker in local_portfolio:
+            local_portfolio.pop(ticker)
+            print(f"[LOG] Successfully removed {ticker} from local portfolio")
+            return {
+                "ok": True,
+                "message": f"Successfully removed {ticker} from local portfolio (external API error)",
+                "source": "local_fallback"
+            }
+        else:
+            return {"ok": False, "error": f"Ticker {ticker} not found in local portfolio"}
 
 @tool("list_portfolio", args_schema=ListPortfolioInput)
 def list_portfolio(user_id: str = DEFAULT_USER_ID):
-    """List all holdings in the user's portfolio."""
+    """List all holdings in the user's portfolio by calling the portfolio API."""
     try:
         print(f"[LOG] list_portfolio called with user_id={user_id}")
         
@@ -121,19 +230,201 @@ def list_portfolio(user_id: str = DEFAULT_USER_ID):
             return {"ok": False, "error": "User ID cannot be empty"}
         
         user_id = user_id.strip()
-        pf = _pf(user_id)
         
-        print(f"[LOG] Successfully listed portfolio for user {user_id}")
-        return {
-            "ok": True,
-            "portfolio": pf, 
-            "portfolio_count": len(pf),
-            "user_id": user_id
-        }
+        print(f"[LOG] Making API request to get portfolio for user {user_id}")
         
+        # Make HTTP request to the portfolio API
+        api_url = f"{PORTFOLIO_API_URL}?user_id={user_id}"
+        response = requests.get(api_url, timeout=10)  # 10 second timeout
+        print(f"[LOG] API response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"[LOG] API response: {result}")
+            
+            # Validate the response structure - handle both "items" and "portfolios" fields
+            items = result.get("items", result.get("portfolios", []))
+            total_count = result.get("total", 0)
+            
+            # Check for data inconsistency
+            if total_count > 0 and (not items or len(items) == 0):
+                print(f"[LOG] Data inconsistency detected: total={total_count}, items={len(items) if items else 0}")
+                return {
+                    "ok": False,
+                    "error": f"Data inconsistency detected: API reports {total_count} items but returned empty list. This may be a temporary issue with the portfolio service.",
+                    "user_id": user_id,
+                    "api_total": total_count,
+                    "api_items_count": len(items) if items else 0
+                }
+            
+            print(f"[LOG] API response success, found {len(items)} items")
+            return {
+                "ok": True,
+                "portfolio": items,
+                "portfolio_count": len(items),
+                "user_id": user_id
+            }
+        else:
+            print(f"[LOG] API response failed with status {response.status_code}")
+            try:
+                error_detail = response.json()
+                print(f"[LOG] API error detail: {error_detail}")
+                return {"ok": False, "error": f"Portfolio API error: {error_detail.get('detail', 'Unknown error')}"}
+            except:
+                return {"ok": False, "error": f"Unable to retrieve portfolio (HTTP {response.status_code})"}
+        
+    except requests.exceptions.ConnectionError:
+        print(f"[LOG] Connection error to API - falling back to local storage")
+        # Fallback to local storage
+        local_portfolio = _pf(user_id)
+        if local_portfolio:
+            return {
+                "ok": True,
+                "portfolio": local_portfolio,
+                "portfolio_count": len(local_portfolio),
+                "user_id": user_id,
+                "source": "local_fallback",
+                "note": "External API unavailable, using local data"
+            }
+        else:
+            return {"ok": False, "error": "Unable to connect to portfolio service and no local data available. Please check if the service is running."}
+    except requests.exceptions.Timeout:
+        print(f"[LOG] Timeout error to API - falling back to local storage")
+        # Fallback to local storage
+        local_portfolio = _pf(user_id)
+        if local_portfolio:
+            return {
+                "ok": True,
+                "portfolio": local_portfolio,
+                "portfolio_count": len(local_portfolio),
+                "user_id": user_id,
+                "source": "local_fallback",
+                "note": "External API timeout, using local data"
+            }
+        else:
+            return {"ok": False, "error": "Portfolio service request timed out and no local data available. Please try again."}
     except Exception as e:
-        print(f"[LOG] Error listing portfolio: {str(e)}")
-        return {"ok": False, "error": f"Error listing portfolio: {str(e)}"}
+        print(f"[LOG] Unexpected error: {str(e)} - falling back to local storage")
+        # Fallback to local storage
+        local_portfolio = _pf(user_id)
+        if local_portfolio:
+            return {
+                "ok": True,
+                "portfolio": local_portfolio,
+                "portfolio_count": len(local_portfolio),
+                "user_id": user_id,
+                "source": "local_fallback",
+                "note": "External API error, using local data"
+            }
+        else:
+            return {"ok": False, "error": f"Unexpected error retrieving portfolio and no local data available: {str(e)}"}
+
+@tool("get_portfolio_summary", args_schema=GetPortfolioSummaryInput)
+def get_portfolio_summary(user_id: str = DEFAULT_USER_ID, include_pnl: bool = True):
+    """Get portfolio summary with PnL calculations for a user by calling the portfolio API."""
+    try:
+        print(f"[LOG] get_portfolio_summary called with user_id={user_id}, include_pnl={include_pnl}")
+        
+        if not user_id or not user_id.strip():
+            print(f"[LOG] Validation failed: user_id is empty")
+            return {"ok": False, "error": "User ID cannot be empty"}
+        
+        user_id = user_id.strip()
+        
+        print(f"[LOG] Making API request to get portfolio summary for user {user_id}")
+        
+        # Make HTTP request to the portfolio summary API
+        api_url = f"{PORTFOLIO_API_URL}summary/{user_id}?include_pnl={str(include_pnl).lower()}"
+        response = requests.get(api_url, timeout=10)  # 10 second timeout
+        print(f"[LOG] API response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"[LOG] API response success: {result}")
+            return {
+                "ok": True,
+                "summary": result,
+                "user_id": user_id,
+                "include_pnl": include_pnl
+            }
+        else:
+            print(f"[LOG] API response failed with status {response.status_code}")
+            try:
+                error_detail = response.json()
+                print(f"[LOG] API error detail: {error_detail}")
+                return {"ok": False, "error": f"Portfolio summary API error: {error_detail.get('detail', 'Unknown error')}"}
+            except:
+                return {"ok": False, "error": f"Unable to retrieve portfolio summary (HTTP {response.status_code})"}
+        
+    except requests.exceptions.ConnectionError:
+        print(f"[LOG] Connection error to API - falling back to local storage")
+        # Fallback to local storage
+        local_portfolio = _pf(user_id)
+        if local_portfolio:
+            # Create a simple summary from local data
+            summary = []
+            for ticker, data in local_portfolio.items():
+                summary.append({
+                    "ticker": ticker,
+                    "note": data.get("note", "No note"),
+                    "source": "local_fallback"
+                })
+            return {
+                "ok": True,
+                "summary": summary,
+                "user_id": user_id,
+                "include_pnl": False,
+                "source": "local_fallback",
+                "note": "External API unavailable, using local data"
+            }
+        else:
+            return {"ok": False, "error": "Unable to connect to portfolio service and no local data available. Please check if the service is running."}
+    except requests.exceptions.Timeout:
+        print(f"[LOG] Timeout error to API - falling back to local storage")
+        # Fallback to local storage
+        local_portfolio = _pf(user_id)
+        if local_portfolio:
+            # Create a simple summary from local data
+            summary = []
+            for ticker, data in local_portfolio.items():
+                summary.append({
+                    "ticker": ticker,
+                    "note": data.get("note", "No note"),
+                    "source": "local_fallback"
+                })
+            return {
+                "ok": True,
+                "summary": summary,
+                "user_id": user_id,
+                "include_pnl": False,
+                "source": "local_fallback",
+                "note": "External API timeout, using local data"
+            }
+        else:
+            return {"ok": False, "error": "Portfolio service request timed out and no local data available. Please try again."}
+    except Exception as e:
+        print(f"[LOG] Unexpected error: {str(e)} - falling back to local storage")
+        # Fallback to local storage
+        local_portfolio = _pf(user_id)
+        if local_portfolio:
+            # Create a simple summary from local data
+            summary = []
+            for ticker, data in local_portfolio.items():
+                summary.append({
+                    "ticker": ticker,
+                    "note": data.get("note", "No note"),
+                    "source": "local_fallback"
+                })
+            return {
+                "ok": True,
+                "summary": summary,
+                "user_id": user_id,
+                "include_pnl": False,
+                "source": "local_fallback",
+                "note": "External API error, using local data"
+            }
+        else:
+            return {"ok": False, "error": f"Unexpected error retrieving portfolio summary and no local data available: {str(e)}"}
 
 # ====== Watchlist Tools ======
 @tool("add_to_watchlist", args_schema=AddWatchlistInput)
@@ -521,6 +812,7 @@ TOOLS = [
     add_to_portfolio,
     remove_from_portfolio,
     list_portfolio,
+    get_portfolio_summary,
     add_to_watchlist,
     remove_from_watchlist,
     list_watchlist,

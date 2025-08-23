@@ -23,6 +23,7 @@ ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-7-sonnet-20250219")
 HOST = "127.0.0.1"
 PORT = 8001
 WATCHLIST_API_URL = "http://localhost:8000/api/v1/watchlist/"
+PORTFOLIO_API_URL = "http://localhost:8000/api/v1/portfolio/"
 
 # ====== Request Processing Configuration ======
 MAX_CONCURRENT_REQUESTS = 5
@@ -47,12 +48,15 @@ SYSTEM_PROMPT = """You are Porta, a finance-focused assistant. Your job: manage 
 
 Rules:
 - Use tools to add/remove/list portfolio or watchlist.
-- The watchlist tools call the external watchlist API to manage data.
+- The portfolio and watchlist tools call external APIs to manage data.
 - Check the "ok" field in tool responses - if it's False, there was an error.
 - When operations fail, explain the error to the user clearly but simply.
 - NEVER expose technical details, backend errors, or API connection issues to users.
 - When operations succeed, provide a brief confirmation message with the result.
-- If the user gives ambiguous instructions, ask a brief clarifying question.
+- IMPORTANT: Always ask for ALL required information before processing requests:
+  * For portfolio: ticker, quantity, buy_price, and optionally note
+  * For watchlist: ticker and optionally note
+- If the user gives incomplete instructions, ask clarifying questions for missing details.
 - Be concise and neutral. Provide insights, not investment advice.
 - Always respect ticker format (uppercase letters/numbers/.-).
 - IMPORTANT: After successfully executing a tool, summarize the result and stop.

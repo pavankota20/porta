@@ -13,7 +13,8 @@ Ticker = constr(pattern=r"^[A-Za-z][A-Za-z0-9.\-]{0,9}$")
 class AddPortfolioInput(BaseModel):
     user_id: str = Field(default="f00dc8bd-eabc-4143-b1f0-fbcb9715a02e")
     ticker: Ticker
-    weight: Optional[float] = None
+    quantity: str = Field(..., description="Number of shares (e.g., '100.0000')")
+    buy_price: str = Field(..., description="Purchase price per share (e.g., '150.5000')")
     note: Optional[str] = None
 
 class RemovePortfolioInput(BaseModel):
@@ -22,6 +23,10 @@ class RemovePortfolioInput(BaseModel):
 
 class ListPortfolioInput(BaseModel):
     user_id: str = Field(default="f00dc8bd-eabc-4143-b1f0-fbcb9715a02e")
+
+class GetPortfolioSummaryInput(BaseModel):
+    user_id: str = Field(default="f00dc8bd-eabc-4143-b1f0-fbcb9715a02e")
+    include_pnl: bool = Field(default=True, description="Include PnL calculations")
 
 class AddWatchlistInput(BaseModel):
     user_id: str = Field(default="f00dc8bd-eabc-4143-b1f0-fbcb9715a02e")
