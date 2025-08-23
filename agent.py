@@ -1,5 +1,8 @@
 import os
 import re
+import json
+import requests
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Tuple
 from pydantic import BaseModel, Field, constr
 
@@ -21,6 +24,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 # ====== In-memory stores ======
 PORTFOLIO: Dict[str, Dict[str, Dict[str, Any]]] = {}  # user_id -> {ticker: {"weight":float|None,"note":str|None}}
 WATCHLIST: Dict[str, set] = {}                         # user_id -> set(tickers)
+DOC_CACHE: Dict[str, Any] = {}                         # Cache for various document types including news
 
 def _pf(user_id: str) -> Dict[str, Dict[str, Any]]:
     return PORTFOLIO.setdefault(user_id, {})
@@ -55,6 +59,11 @@ class RemoveWatchlistInput(BaseModel):
 
 class ListWatchlistInput(BaseModel):
     user_id: str = Field(default="demo_user")
+
+class GetNewsInput(BaseModel):
+    user_id: str = Field(default="demo_user")
+    ticker: Ticker
+    lookback_days: int = Field(default=3, ge=1, le=30, description="Number of days to look back for news")
 
 @tool("add_to_portfolio", args_schema=AddPortfolioInput)
 def add_to_portfolio(user_id: str = "demo_user", ticker: str = "", 
@@ -105,7 +114,7 @@ class WebSearchInput(BaseModel):
 @tool("web_search", args_schema=WebSearchInput)
 def web_search(query: str, max_results: int = 5):
     """Perform a web search for the given query. This is a test implementation that will be replaced with actual API integration later."""
-    # Test implementation - just return a mock response
+
     return {
         "query": query,
         "results": [
@@ -125,6 +134,56 @@ def web_search(query: str, max_results: int = 5):
         "message": "This is a test implementation. Real web search API will be integrated later."
     }
 
+@tool("get_news", args_schema=GetNewsInput)
+def get_news(user_id: str = "demo_user", ticker: str = "", lookback_days: int = 3):
+    """Fetch finance-focused news headlines for a given ticker within the last N days."""
+    
+    # Check cache first
+    cache_key = f"news:{user_id}:{ticker}:{lookback_days}"
+    if cache_key in DOC_CACHE:
+        return DOC_CACHE[cache_key]
+    
+    # Mock response for testing tool calling
+    mock_items = [
+        {
+            "ticker": ticker,
+            "title": f"Mock News: {ticker} Reports Strong Q4 Earnings",
+            "url": f"https://example.com/{ticker.lower()}-earnings",
+            "source": "Mock Reuters",
+            "snippet": f"This is a mock news snippet for {ticker} showing that the get_news tool is working correctly.",
+            "published_at": "2024-01-15T10:30:00Z"
+        },
+        {
+            "ticker": ticker,
+            "title": f"Mock News: {ticker} Announces New Product Launch",
+            "url": f"https://example.com/{ticker.lower()}-product",
+            "source": "Mock Bloomberg",
+            "snippet": f"Mock announcement from {ticker} about new product development.",
+            "published_at": "2024-01-14T15:45:00Z"
+        },
+        {
+            "ticker": ticker,
+            "title": f"Mock News: {ticker} Stock Analysis and Outlook",
+            "url": f"https://example.com/{ticker.lower()}-analysis",
+            "source": "Mock CNBC",
+            "snippet": f"Mock financial analysis and future outlook for {ticker} stock.",
+            "published_at": "2024-01-13T09:15:00Z"
+        }
+    ]
+    
+    # Cache the results
+    result = {
+        "ok": True,
+        "ticker": ticker,
+        "lookback_days": lookback_days,
+        "items": mock_items,
+        "status": "mock_mode",
+        "message": "This is a mock implementation. Real Brave Search API will be integrated later."
+    }
+    DOC_CACHE[cache_key] = result
+    
+    return result
+
 TOOLS = [
     add_to_portfolio,
     remove_from_portfolio,
@@ -133,6 +192,7 @@ TOOLS = [
     remove_from_watchlist,
     list_watchlist,
     web_search,
+    get_news,
 ]
 
 # Create a dictionary mapping tool names to tool functions for easy lookup
@@ -175,7 +235,6 @@ def build_agent():
         temperature=0,
     )
     
-    # Create a proper agent with tool calling capabilities
     prompt = ChatPromptTemplate.from_messages([
         ("system", SYSTEM),
         MessagesPlaceholder(variable_name="chat_history"),
@@ -199,6 +258,8 @@ def run_interactive():
     print("  - 'remove AAPL from watchlist'")
     print("  - 'search for Tesla stock news'")
     print("  - 'web search for market trends'")
+    print("  - 'get news for AAPL'")
+    print("  - 'get news for MSFT last 7 days'")
     print("Type 'quit' or 'exit' to stop.")
     print("=" * 50)
 
@@ -216,20 +277,16 @@ def run_interactive():
 
             print("Porta: ", end="", flush=True)
             
-            # Create messages for the agent
             messages = [
                 SystemMessage(content="You are Porta, a finance assistant. Use tools to manage portfolios and watchlists. After calling a tool, provide a brief summary of what was done."),
                 *history,
                 HumanMessage(content=user_input)
             ]
             
-            # Invoke the agent executor
             result = agent.invoke({"input": user_input, "chat_history": history})
             
-            # Display the result
             print(result["output"])
             
-            # Update history
             history.append({"role": "user", "content": user_input})
             history.append({"role": "assistant", "content": result})
 
@@ -249,7 +306,8 @@ def test_tool_calls():
         "add AAPL to my watchlist",
         "put MSFT in my portfolio",
         "list my portfolio",
-        "search for Tesla stock news"
+        "search for Tesla stock news",
+        "get news for AAPL"
     ]
     
     for query in test_queries:
@@ -259,7 +317,6 @@ def test_tool_calls():
         
         result = agent.invoke({"input": query, "chat_history": []})
         
-        # Display the result
         print(f"\nResponse: {result['output']}")
 
 if __name__ == "__main__":
