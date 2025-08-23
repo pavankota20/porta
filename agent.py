@@ -16,6 +16,8 @@ import threading
 from queue import Queue
 import time
 import uuid
+import requests
+import json
 
 # Load environment variables
 try:
@@ -39,32 +41,32 @@ MAX_STORED_REQUESTS = 100
 Ticker = constr(pattern=r"^[A-Za-z][A-Za-z0-9.\-]{0,9}$")
 
 class AddPortfolioInput(BaseModel):
-    user_id: str = Field(default="demo_user")
+    user_id: str = Field(default="f00dc8bd-eabc-4143-b1f0-fbcb9715a02e")
     ticker: Ticker
     weight: Optional[float] = None
     note: Optional[str] = None
 
 class RemovePortfolioInput(BaseModel):
-    user_id: str = Field(default="demo_user")
+    user_id: str = Field(default="f00dc8bd-eabc-4143-b1f0-fbcb9715a02e")
     ticker: Ticker
 
 class ListPortfolioInput(BaseModel):
-    user_id: str = Field(default="demo_user")
+    user_id: str = Field(default="f00dc8bd-eabc-4143-b1f0-fbcb9715a02e")
 
 class AddWatchlistInput(BaseModel):
-    user_id: str = Field(default="demo_user")
+    user_id: str = Field(default="f00dc8bd-eabc-4143-b1f0-fbcb9715a02e")
     ticker: Ticker
     note: Optional[str] = None
 
 class RemoveWatchlistInput(BaseModel):
-    user_id: str = Field(default="demo_user")
+    user_id: str = Field(default="f00dc8bd-eabc-4143-b1f0-fbcb9715a02e")
     ticker: Ticker
 
 class ListWatchlistInput(BaseModel):
-    user_id: str = Field(default="demo_user")
+    user_id: str = Field(default="f00dc8bd-eabc-4143-b1f0-fbcb9715a02e")
 
 class GetNewsInput(BaseModel):
-    user_id: str = Field(default="demo_user")
+    user_id: str = Field(default="f00dc8bd-eabc-4143-b1f0-fbcb9715a02e")
     ticker: Ticker
     lookback_days: int = Field(default=3, ge=1, le=30)
 
@@ -75,7 +77,7 @@ class WebSearchInput(BaseModel):
 # ====== API Models ======
 class ChatRequest(BaseModel):
     message: str = Field(..., description="User's message/prompt")
-    user_id: str = Field(default="demo_user", description="User identifier")
+    user_id: str = Field(default="f00dc8bd-eabc-4143-b1f0-fbcb9715a02e", description="User identifier")
     chat_history: List[Dict[str, str]] = Field(default=[], description="Previous chat history")
 
 class ChatResponse(BaseModel):
@@ -85,7 +87,7 @@ class ChatResponse(BaseModel):
 
 class AsyncChatRequest(BaseModel):
     message: str = Field(..., description="User's message/prompt")
-    user_id: str = Field(default="demo_user", description="User identifier")
+    user_id: str = Field(default="f00dc8bd-eabc-4143-b1f0-fbcb9715a02e", description="User identifier")
     chat_history: List[Dict[str, str]] = Field(default=[], description="Previous chat history")
 
 class AsyncChatResponse(BaseModel):
@@ -102,9 +104,9 @@ class RequestStatusResponse(BaseModel):
     created_at: str = Field(..., description="Request creation timestamp")
     completed_at: Optional[str] = Field(None, description="Request completion timestamp")
 
-# ====== Data Storage ======
+
 PORTFOLIO: Dict[str, Dict[str, Dict[str, Any]]] = {}
-WATCHLIST: Dict[str, set] = {}
+WATCHLIST: Dict[str, Dict[str, Dict[str, Any]]] = {}  
 DOC_CACHE: Dict[str, Any] = {}
 
 # ====== Async Request Management ======
@@ -119,52 +121,347 @@ def _pf(user_id: str) -> Dict[str, Dict[str, Any]]:
     """Get user portfolio, create if doesn't exist"""
     return PORTFOLIO.setdefault(user_id, {})
 
-def _wl(user_id: str) -> set:
+def _wl(user_id: str) -> Dict[str, Dict[str, Any]]:
     """Get user watchlist, create if doesn't exist"""
-    return WATCHLIST.setdefault(user_id, set())
+    return WATCHLIST.setdefault(user_id, {})
+
+
 
 # ====== LangChain Tools ======
 @tool("add_to_portfolio", args_schema=AddPortfolioInput)
-def add_to_portfolio(user_id: str = "demo_user", ticker: str = "",
+def add_to_portfolio(user_id: str = "f00dc8bd-eabc-4143-b1f0-fbcb9715a02e", ticker: str = "",
                      weight: Optional[float] = None, note: Optional[str] = None):
     """Add or upsert a holding in the user's portfolio."""
-    pf = _pf(user_id)
-    pf[ticker] = {"weight": weight, "note": note}
-    return {"ok": True, "portfolio": pf}
+    try:
+        print(f"[LOG] add_to_portfolio called with user_id={user_id}, ticker={ticker}, weight={weight}, note={note}")
+        
+        # Validate inputs
+        if not ticker or not ticker.strip():
+            print(f"[LOG] Validation failed: ticker is empty")
+            return {"ok": False, "error": "Ticker cannot be empty"}
+        
+        if not user_id or not user_id.strip():
+            print(f"[LOG] Validation failed: user_id is empty")
+            return {"ok": False, "error": "User ID cannot be empty"}
+        
+        ticker = ticker.strip().upper()
+        user_id = user_id.strip()
+        
+        print(f"[LOG] Making API request to add {ticker} for user {user_id}")
+        
+        # Validate weight if provided
+        if weight is not None and (weight < 0 or weight > 100):
+            print(f"[LOG] Validation failed: weight is invalid ({weight})")
+            return {"ok": False, "error": "Weight must be between 0 and 100"}
+        
+        pf = _pf(user_id)
+        existed = ticker in pf
+        
+        pf[ticker] = {"weight": weight, "note": note}
+        
+        # Verify the entry was actually added
+        if ticker in pf:
+            print(f"[LOG] Successfully added {ticker} to portfolio")
+            return {
+                "ok": True, 
+                "message": f"{'Updated' if existed else 'Added'} {ticker} in portfolio",
+                "portfolio": pf,
+                "portfolio_count": len(pf)
+            }
+        else:
+            print(f"[LOG] Failed to add ticker {ticker} to portfolio")
+            return {"ok": False, "error": "Failed to add ticker to portfolio"}
+            
+    except Exception as e:
+        print(f"[LOG] Error adding to portfolio: {str(e)}")
+        return {"ok": False, "error": f"Error adding to portfolio: {str(e)}"}
 
 @tool("remove_from_portfolio", args_schema=RemovePortfolioInput)
-def remove_from_portfolio(user_id: str = "demo_user", ticker: str = ""):
+def remove_from_portfolio(user_id: str = "f00dc8bd-eabc-4143-b1f0-fbcb9715a02e", ticker: str = ""):
     """Remove a holding from the user's portfolio."""
-    pf = _pf(user_id)
-    existed = ticker in pf
-    pf.pop(ticker, None)
-    return {"ok": True, "removed": existed, "portfolio": pf}
+    try:
+        print(f"[LOG] remove_from_portfolio called with user_id={user_id}, ticker={ticker}")
+        
+        # Validate inputs
+        if not ticker or not ticker.strip():
+            print(f"[LOG] Validation failed: ticker is empty")
+            return {"ok": False, "error": "Ticker cannot be empty"}
+        
+        if not user_id or not user_id.strip():
+            print(f"[LOG] Validation failed: user_id is empty")
+            return {"ok": False, "error": "User ID cannot be empty"}
+        
+        ticker = ticker.strip().upper()
+        user_id = user_id.strip()
+        
+        print(f"[LOG] Making API request to remove {ticker} from user {user_id}")
+        
+        pf = _pf(user_id)
+        existed = ticker in pf
+        
+        if existed:
+            pf.pop(ticker)
+            print(f"[LOG] Successfully removed {ticker} from portfolio")
+            return {
+                "ok": True, 
+                "message": f"Successfully removed {ticker} from portfolio",
+                "removed": True, 
+                "portfolio": pf,
+                "portfolio_count": len(pf)
+            }
+        else:
+            print(f"[LOG] Ticker {ticker} not found in portfolio")
+            return {"ok": False, "error": f"Ticker {ticker} not found in portfolio"}
+            
+    except Exception as e:
+        print(f"[LOG] Error removing from portfolio: {str(e)}")
+        return {"ok": False, "error": f"Error removing from portfolio: {str(e)}"}
 
 @tool("list_portfolio", args_schema=ListPortfolioInput)
-def list_portfolio(user_id: str = "demo_user"):
+def list_portfolio(user_id: str = "f00dc8bd-eabc-4143-b1f0-fbcb9715a02e"):
     """List all holdings in the user's portfolio."""
-    return {"portfolio": _pf(user_id)}
+    try:
+        print(f"[LOG] list_portfolio called with user_id={user_id}")
+        
+        if not user_id or not user_id.strip():
+            print(f"[LOG] Validation failed: user_id is empty")
+            return {"ok": False, "error": "User ID cannot be empty"}
+        
+        user_id = user_id.strip()
+        pf = _pf(user_id)
+        
+        print(f"[LOG] Successfully listed portfolio for user {user_id}")
+        return {
+            "ok": True,
+            "portfolio": pf, 
+            "portfolio_count": len(pf),
+            "user_id": user_id
+        }
+        
+    except Exception as e:
+        print(f"[LOG] Error listing portfolio: {str(e)}")
+        return {"ok": False, "error": f"Error listing portfolio: {str(e)}"}
 
 @tool("add_to_watchlist", args_schema=AddWatchlistInput)
-def add_to_watchlist(user_id: str = "demo_user", ticker: str = "",
+def add_to_watchlist(user_id: str = "f00dc8bd-eabc-4143-b1f0-fbcb9715a02e", ticker: str = "",
                      note: Optional[str] = None):
-    """Add a ticker to the user's watchlist."""
-    wl = _wl(user_id)
-    wl.add(ticker)
-    return {"ok": True, "watchlist": sorted(wl)}
+    """Add a ticker to the user's watchlist by calling the watchlist API."""
+    try:
+        print(f"[LOG] add_to_watchlist called with user_id={user_id}, ticker={ticker}, note={note}")
+        
+        # Validate inputs
+        if not ticker or not ticker.strip():
+            print(f"[LOG] Validation failed: ticker is empty")
+            return {"ok": False, "error": "Ticker cannot be empty"}
+        
+        if not user_id or not user_id.strip():
+            print(f"[LOG] Validation failed: user_id is empty")
+            return {"ok": False, "error": "User ID cannot be empty"}
+        
+        ticker = ticker.strip().upper()
+        user_id = user_id.strip()
+        
+        print(f"[LOG] Making API request to add {ticker} for user {user_id}")
+        
+        # Make HTTP request to the watchlist API
+        api_url = "http://localhost:8000/api/v1/watchlist/"
+        payload = {
+            "user_id": user_id,
+            "ticker": ticker,
+            "note": note
+        }
+        
+        print(f"[LOG] API payload: {payload}")
+        response = requests.post(api_url, json=payload, headers={"Content-Type": "application/json"})
+        print(f"[LOG] API response status: {response.status_code}")
+        print(f"[LOG] API response headers: {dict(response.headers)}")
+        
+        if response.status_code in [200, 201]:  # 200 OK, 201 Created
+            result = response.json()
+            print(f"[LOG] API response success: {result}")
+            print(f"[LOG] Tool returning success response")
+            return {
+                "ok": True,
+                "message": f"Successfully added {ticker} to watchlist",
+                "api_response": result
+            }
+        elif response.status_code == 400:
+            result = response.json()
+            print(f"[LOG] API response error 400: {result}")
+            print(f"[LOG] Tool returning error response for 400")
+            return {"ok": False, "error": result.get("detail", "Unable to add ticker to watchlist")}
+        else:
+            print(f"[LOG] API response unexpected status: {response.status_code}")
+            print(f"[LOG] Tool returning error response for unexpected status")
+            return {"ok": False, "error": "Unable to add ticker to watchlist at this time"}
+            
+    except requests.exceptions.ConnectionError:
+        print(f"[LOG] Connection error to API")
+        return {"ok": False, "error": "Unable to add ticker to watchlist at this time"}
+    except Exception as e:
+        print(f"[LOG] Unexpected error: {str(e)}")
+        print(f"[LOG] Tool returning error response for exception")
+        return {"ok": False, "error": "Unable to add ticker to watchlist at this time"}
 
 @tool("remove_from_watchlist", args_schema=RemoveWatchlistInput)
-def remove_from_watchlist(user_id: str = "demo_user", ticker: str = ""):
-    """Remove a ticker from the user's watchlist."""
-    wl = _wl(user_id)
-    existed = ticker in wl
-    wl.discard(ticker)
-    return {"ok": True, "removed": existed, "watchlist": sorted(wl)}
+def remove_from_watchlist(user_id: str = "f00dc8bd-eabc-4143-b1f0-fbcb9715a02e", ticker: str = ""):
+    """Remove a ticker from the user's watchlist by calling the watchlist API."""
+    try:
+        print(f"[LOG] remove_from_watchlist called with user_id={user_id}, ticker={ticker}")
+        
+        # Validate inputs
+        if not ticker or not ticker.strip():
+            print(f"[LOG] Validation failed: ticker is empty")
+            return {"ok": False, "error": "Ticker cannot be empty"}
+        
+        if not user_id or not user_id.strip():
+            print(f"[LOG] Validation failed: user_id is empty")
+            return {"ok": False, "error": "User ID cannot be empty"}
+        
+        ticker = ticker.strip().upper()
+        user_id = user_id.strip()
+        
+        print(f"[LOG] Getting watchlist for user {user_id} to find entry for {ticker}")
+        
+        # First, get the watchlist to find the entry ID
+        list_url = f"http://localhost:8000/api/v1/watchlist/?user_id={user_id}"
+        list_response = requests.get(list_url)
+        print(f"[LOG] List API response status: {list_response.status_code}")
+        
+        if list_response.status_code != 200:
+            print(f"[LOG] Failed to get watchlist")
+            return {"ok": False, "error": "Unable to remove ticker from watchlist"}
+        
+        list_data = list_response.json()
+        entry_id = None
+        
+        # Find the entry with matching ticker
+        for item in list_data.get("items", []):
+            if item.get("ticker") == ticker:
+                entry_id = item.get("id")
+                break
+        
+        if not entry_id:
+            print(f"[LOG] Entry not found for ticker {ticker}")
+            return {"ok": False, "error": f"Ticker {ticker} not found in watchlist"}
+        
+        print(f"[LOG] Found entry ID {entry_id}, deleting...")
+        
+        # Delete the entry
+        delete_url = f"http://localhost:8000/api/v1/watchlist/{entry_id}"
+        delete_response = requests.delete(delete_url)
+        print(f"[LOG] Delete API response status: {delete_response.status_code}")
+        
+        if delete_response.status_code == 200:
+            print(f"[LOG] Successfully deleted entry {entry_id}")
+            return {
+                "ok": True,
+                "message": f"Successfully removed {ticker} from watchlist"
+            }
+        else:
+            print(f"[LOG] Failed to delete entry")
+            return {"ok": False, "error": "Unable to remove ticker from watchlist"}
+            
+    except requests.exceptions.ConnectionError:
+        print(f"[LOG] Connection error to API")
+        return {"ok": False, "error": "Unable to remove ticker from watchlist at this time"}
+    except Exception as e:
+        print(f"[LOG] Unexpected error: {str(e)}")
+        return {"ok": False, "error": "Unable to remove ticker from watchlist at this time"}
 
 @tool("list_watchlist", args_schema=ListWatchlistInput)
-def list_watchlist(user_id: str = "demo_user"):
-    """List all tickers in the user's watchlist."""
-    return {"watchlist": sorted(_wl(user_id))}
+def list_watchlist(user_id: str = "f00dc8bd-eabc-4143-b1f0-fbcb9715a02e"):
+    """List all tickers in the user's watchlist by calling the watchlist API."""
+    try:
+        print(f"[LOG] list_watchlist called with user_id={user_id}")
+        
+        if not user_id or not user_id.strip():
+            print(f"[LOG] Validation failed: user_id is empty")
+            return {"ok": False, "error": "User ID cannot be empty"}
+        
+        user_id = user_id.strip()
+        
+        print(f"[LOG] Making API request to get watchlist for user {user_id}")
+        
+        # Make HTTP request to the watchlist API
+        api_url = f"http://localhost:8000/api/v1/watchlist/?user_id={user_id}"
+        response = requests.get(api_url)
+        print(f"[LOG] API response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"[LOG] API response success, found {result.get('total', 0)} items")
+            return {
+                "ok": True,
+                "watchlist": result.get("items", []),
+                "count": result.get("total", 0),
+                "user_id": user_id
+            }
+        else:
+            print(f"[LOG] API response failed")
+            return {"ok": False, "error": "Unable to retrieve watchlist at this time"}
+        
+    except requests.exceptions.ConnectionError:
+        print(f"[LOG] Connection error to API")
+        return {"ok": False, "error": "Unable to retrieve watchlist at this time"}
+    except Exception as e:
+        print(f"[LOG] Unexpected error: {str(e)}")
+        return {"ok": False, "error": "Unable to retrieve watchlist at this time"}
+
+@tool("get_watchlist_entry", args_schema=ListWatchlistInput)
+def get_watchlist_entry(user_id: str = "f00dc8bd-eabc-4143-b1f0-fbcb9715a02e", ticker: str = ""):
+    """Get a specific watchlist entry by ticker for a user by calling the watchlist API."""
+    try:
+        print(f"[LOG] get_watchlist_entry called with user_id={user_id}, ticker={ticker}")
+        
+        # Validate inputs
+        if not ticker or not ticker.strip():
+            print(f"[LOG] Validation failed: ticker is empty")
+            return {"ok": False, "error": "Ticker cannot be empty"}
+        
+        if not user_id or not user_id.strip():
+            print(f"[LOG] Validation failed: user_id is empty")
+            return {"ok": False, "error": "User ID cannot be empty"}
+        
+        ticker = ticker.strip().upper()
+        user_id = user_id.strip()
+        
+        print(f"[LOG] Making API request to get watchlist for user {user_id}")
+        
+        # Make HTTP request to the watchlist API
+        api_url = f"http://localhost:8000/api/v1/watchlist/?user_id={user_id}"
+        response = requests.get(api_url)
+        print(f"[LOG] API response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            
+            # Find the entry with matching ticker
+            for item in result.get("items", []):
+                if item.get("ticker") == ticker:
+                    print(f"[LOG] Found entry for ticker {ticker}")
+                    return {
+                        "ok": True,
+                        "entry": item,
+                        "message": f"Found {ticker} in watchlist"
+                    }
+            
+            print(f"[LOG] Entry not found for ticker {ticker}")
+            return {
+                "ok": False, 
+                "error": f"Ticker {ticker} not found in watchlist",
+                "user_id": user_id
+            }
+        else:
+            print(f"[LOG] API response failed")
+            return {"ok": False, "error": "Unable to retrieve watchlist entry at this time"}
+        
+    except requests.exceptions.ConnectionError:
+        print(f"[LOG] Connection error to API")
+        return {"ok": False, "error": "Unable to retrieve watchlist entry at this time"}
+    except Exception as e:
+        print(f"[LOG] Unexpected error: {str(e)}")
+        return {"ok": False, "error": "Unable to retrieve watchlist entry at this time"}
 
 @tool("web_search", args_schema=WebSearchInput)
 def web_search(query: str, max_results: int = 5):
@@ -189,7 +486,7 @@ def web_search(query: str, max_results: int = 5):
     }
 
 @tool("get_news", args_schema=GetNewsInput)
-def get_news(user_id: str = "demo_user", ticker: str = "", lookback_days: int = 3):
+def get_news(user_id: str = "f00dc8bd-eabc-4143-b1f0-fbcb9715a02e", ticker: str = "", lookback_days: int = 3):
     """Fetch finance-focused news headlines for a given ticker within the last N days."""
     cache_key = f"news:{user_id}:{ticker}:{lookback_days}"
     if cache_key in DOC_CACHE:
@@ -233,6 +530,7 @@ TOOLS = [
     add_to_watchlist,
     remove_from_watchlist,
     list_watchlist,
+    get_watchlist_entry,
     web_search,
     get_news,
 ]
@@ -242,7 +540,11 @@ SYSTEM_PROMPT = """You are Porta, a finance-focused assistant. Your job: manage 
 
 Rules:
 - Use tools to add/remove/list portfolio or watchlist.
-- After calling a tool, provide a brief confirmation message to the user.
+- The watchlist tools call the external watchlist API to manage data.
+- Check the "ok" field in tool responses - if it's False, there was an error.
+- When operations fail, explain the error to the user clearly but simply.
+- NEVER expose technical details, backend errors, or API connection issues to users.
+- When operations succeed, provide a brief confirmation message with the result.
 - If the user gives ambiguous instructions, ask a brief clarifying question.
 - Be concise and neutral. Provide insights, not investment advice.
 - Always respect ticker format (uppercase letters/numbers/.-).
@@ -584,7 +886,8 @@ async def get_user_portfolio(user_id: str):
 @app.get("/watchlist/{user_id}")
 async def get_user_watchlist(user_id: str):
     """Get user's watchlist"""
-    return {"watchlist": sorted(_wl(user_id)), "user_id": user_id}
+    return {"watchlist": sorted(_wl(user_id).values()), "user_id": user_id}
+
 
 # ====== Interactive Mode ======
 def run_interactive():
@@ -597,6 +900,7 @@ def run_interactive():
     print("  - 'put MSFT in my portfolio'")
     print("  - 'list my portfolio'")
     print("  - 'remove AAPL from watchlist'")
+    print("  - 'get watchlist entry for AAPL'")
     print("  - 'search for Tesla stock news'")
     print("  - 'web search for market trends'")
     print("  - 'get news for AAPL'")
@@ -629,6 +933,57 @@ def run_interactive():
         except Exception as e:
             print(f"Error: {e}")
             print("Please try again.")
+
+def test_watchlist_tool():
+    """Test the watchlist tool directly to debug the issue"""
+    print("=== Testing Watchlist Tool ===")
+    
+    # Test the underlying function directly (not the LangChain tool wrapper)
+    print("Testing add_to_watchlist function...")
+    
+    # Import the requests module to test the API call
+    import requests
+    
+    user_id = "f00dc8bd-eabc-4143-b1f0-fbcb9715a02e"
+    ticker = "TEST"
+    note = "Test entry"
+    
+    print(f"Testing API call with: user_id={user_id}, ticker={ticker}, note={note}")
+    
+    try:
+        # Make the same API call that the tool makes
+        api_url = "http://localhost:8000/api/v1/watchlist/"
+        payload = {
+            "user_id": user_id,
+            "ticker": ticker,
+            "note": note
+        }
+        
+        print(f"Making POST request to: {api_url}")
+        print(f"Payload: {payload}")
+        
+        response = requests.post(api_url, json=payload, headers={"Content-Type": "application/json"})
+        
+        print(f"Response status: {response.status_code}")
+        print(f"Response headers: {dict(response.headers)}")
+        
+        if response.status_code in [200, 201]:  # 200 OK, 201 Created
+            result = response.json()
+            print(f"✅ API call successful: {result}")
+        else:
+            print(f"❌ API call failed with status {response.status_code}")
+            try:
+                error_result = response.json()
+                print(f"Error details: {error_result}")
+            except:
+                print(f"Error text: {response.text}")
+                
+    except requests.exceptions.ConnectionError:
+        print("❌ Connection error - API server not running on port 8000")
+    except Exception as e:
+        print(f"❌ Unexpected error: {str(e)}")
+    
+    print("=== Test Complete ===")
 
 # ====== Main Entry Point ======
 if __name__ == "__main__":
@@ -668,7 +1023,7 @@ if __name__ == "__main__":
         uvicorn.run(
             "agent:app", 
             host="127.0.0.1", 
-            port=8000, 
+            port=8001, 
             reload=False,
             log_level="info"
         )
