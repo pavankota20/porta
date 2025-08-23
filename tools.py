@@ -11,7 +11,7 @@ from config import DEFAULT_USER_ID, DOC_CACHE, WATCHLIST_API_URL, PORTFOLIO_API_
 from models import (
     AddPortfolioInput, RemovePortfolioInput, ListPortfolioInput, GetPortfolioSummaryInput,
     AddWatchlistInput, RemoveWatchlistInput, ListWatchlistInput, GetWatchlistEntryInput,
-    GetNewsInput, WebSearchInput
+    WebSearchInput
 )
 
 # ====== Portfolio Tools ======
@@ -703,44 +703,6 @@ def web_search(query: str, result_filter: str = "web", search_lang: str = "en_US
         print(f"[LOG] Unexpected error: {str(e)}")
         return {"ok": False, "error": f"Unexpected error during web search: {str(e)}"}
 
-@tool("get_news", args_schema=GetNewsInput)
-def get_news(user_id: str = DEFAULT_USER_ID, ticker: str = "", lookback_days: int = 3):
-    """Fetch finance-focused news headlines for a given ticker within the last N days."""
-    cache_key = f"news:{user_id}:{ticker}:{lookback_days}"
-    if cache_key in DOC_CACHE:
-        return DOC_CACHE[cache_key]
-    
-    # Simple mock implementation for now
-    mock_items = [
-        {
-            "ticker": ticker,
-            "title": f"Mock News: {ticker} Reports Strong Q4 Earnings",
-            "url": f"https://example.com/{ticker.lower()}-earnings",
-            "source": "Mock Reuters",
-            "snippet": f"This is a mock news snippet for {ticker} showing that the get_news tool is working correctly.",
-            "published_at": "2024-01-15T10:30:00Z"
-        },
-        {
-            "ticker": ticker,
-            "title": f"Mock News: {ticker} Announces New Product Launch",
-            "url": f"https://example.com/{ticker.lower()}-product",
-            "source": "Mock Bloomberg",
-            "snippet": f"Mock announcement from {ticker} about new product development.",
-            "published_at": "2024-01-14T15:45:00Z"
-        }
-    ]
-    
-    result = {
-        "ok": True,
-        "ticker": ticker,
-        "lookback_days": lookback_days,
-        "items": mock_items,
-        "status": "mock_mode",
-        "message": "This is a mock implementation. Real Brave Search API will be integrated later."
-    }
-    DOC_CACHE[cache_key] = result
-    return result
-
 # ====== Tool List ======
 TOOLS = [
     add_to_portfolio,
@@ -752,5 +714,4 @@ TOOLS = [
     list_watchlist,
     get_watchlist_entry,
     web_search,
-    get_news,
 ]

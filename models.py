@@ -44,11 +44,6 @@ class GetWatchlistEntryInput(BaseModel):
     user_id: str = Field(default="f00dc8bd-eabc-4143-b1f0-fbcb9715a02e")
     ticker: Ticker
 
-class GetNewsInput(BaseModel):
-    user_id: str = Field(default="f00dc8bd-eabc-4143-b1f0-fbcb9715a02e")
-    ticker: Ticker
-    lookback_days: int = Field(default=3, ge=1, le=30)
-
 class WebSearchInput(BaseModel):
     query: str = Field(..., description="Search query string (1-500 characters)")
     result_filter: Optional[str] = Field(default="web", description="Filter results by type (web, news, videos, locations, faq, discussions, infobox, mixed, summarizer, rich)")
