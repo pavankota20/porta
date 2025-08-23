@@ -31,6 +31,24 @@ def clean_agent_response(result: Any) -> str:
     result_str = str(result)
     print(f"[DEBUG] Result as string: {result_str}")
     
+    # Check if the result string contains the entire chat history (this should not happen)
+    if "'input':" in result_str and "'chat_history':" in result_str:
+        print(f"[DEBUG] WARNING: Result contains entire chat history, this indicates an agent configuration issue")
+        # Try to extract just the output part if it exists
+        if "'output':" in result_str:
+            try:
+                # Try to parse and extract just the output
+                import ast
+                parsed = ast.literal_eval(result_str)
+                if isinstance(parsed, dict) and "output" in parsed:
+                    output = parsed["output"]
+                    print(f"[DEBUG] Extracted output from chat history: {output}")
+                    return _extract_text_from_nested_content(str(output))
+            except:
+                pass
+        # If we can't extract output, return a generic message
+        return "I apologize, but there was an issue processing your request. Please try again."
+    
     # Check if the result string contains JSON-like structures
     if "'text':" in result_str or '"text":' in result_str:
         print(f"[DEBUG] Detected text field in result string")
@@ -268,13 +286,49 @@ async def chat_with_agent(request: ChatRequest):
         enhanced_history = history + [{"role": "user", "content": request.message}]
         
         # Invoke agent with full conversation context
-        result = agent.invoke({
-            "input": request.message,
-            "chat_history": enhanced_history
-        })
+        print(f"[DEBUG] Invoking agent with input: {request.message}")
+        print(f"[DEBUG] Chat history length: {len(enhanced_history)}")
+        
+        try:
+            result = agent.invoke({
+                "input": request.message,
+                "chat_history": enhanced_history
+            })
+            print(f"[DEBUG] Agent invocation successful, result type: {type(result)}")
+        except Exception as e:
+            print(f"[ERROR] Agent invocation failed: {str(e)}")
+            return ChatResponse(
+                response="I apologize, but there was an issue processing your request. Please try again.",
+                user_id=request.user_id,
+                session_id=session_id,
+                status="agent_error"
+            )
         
         # Handle response format
         response_text = clean_agent_response(result)
+        
+        # Check if response is suspiciously long (might contain entire chat history)
+        if len(response_text) > 2000:  # Arbitrary threshold
+            print(f"[DEBUG] WARNING: Response is very long ({len(response_text)} chars), might contain chat history")
+            # Try to extract just the last meaningful response
+            if "'output':" in response_text:
+                try:
+                    import ast
+                    parsed = ast.literal_eval(response_text)
+                    if isinstance(parsed, dict) and "output" in parsed:
+                        output = parsed["output"]
+                        if isinstance(output, list) and len(output) > 0:
+                            last_item = output[-1]
+                            if isinstance(last_item, dict) and "text" in last_item:
+                                response_text = last_item["text"]
+                                print(f"[DEBUG] Extracted last response text: {response_text[:100]}...")
+                except:
+                    pass
+            
+            # If still too long, truncate and add note
+            if len(response_text) > 1000:
+                response_text = response_text[:1000] + "...\n\n[Response truncated due to length]"
+                print(f"[DEBUG] Response truncated to {len(response_text)} chars")
         
         # Ensure response is string
         if not isinstance(response_text, str):
