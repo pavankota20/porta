@@ -3,5 +3,5 @@ __pycache__/
 .env
 .cursorignore
 https:/
-.docs/
-.porta_env/
+docs/
+porta_env/
