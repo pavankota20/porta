@@ -48,6 +48,7 @@ def build_agent():
     
     prompt = ChatPromptTemplate.from_messages([
         ("system", SYSTEM_PROMPT),
+        MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}"),
         MessagesPlaceholder(variable_name="agent_scratchpad"),
     ])

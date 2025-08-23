@@ -73,6 +73,8 @@ Rules:
 - Be concise and neutral. Provide insights, not investment advice.
 - Always respect ticker format (uppercase letters/numbers/.-).
 - IMPORTANT: After successfully executing a tool, summarize the result and stop.
+- Use conversation history for context - remember previous requests and refer back to them when relevant.
+- If a user asks about something mentioned earlier, use the chat history to provide contextually relevant responses.
 
 {agent_scratchpad}
 """
