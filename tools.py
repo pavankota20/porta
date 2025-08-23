@@ -11,7 +11,7 @@ import json
 from config import DEFAULT_USER_ID, PORTFOLIO, WATCHLIST, DOC_CACHE, WATCHLIST_API_URL
 from models import (
     AddPortfolioInput, RemovePortfolioInput, ListPortfolioInput,
-    AddWatchlistInput, RemoveWatchlistInput, ListWatchlistInput,
+    AddWatchlistInput, RemoveWatchlistInput, ListWatchlistInput, GetWatchlistEntryInput,
     GetNewsInput, WebSearchInput
 )
 
@@ -165,7 +165,7 @@ def add_to_watchlist(user_id: str = DEFAULT_USER_ID, ticker: str = "",
         }
         
         print(f"[LOG] API payload: {payload}")
-        response = requests.post(WATCHLIST_API_URL, json=payload, headers={"Content-Type": "application/json"})
+        response = requests.post(WATCHLIST_API_URL, json=payload, headers={"Content-Type": "application/json"}, timeout=10)
         print(f"[LOG] API response status: {response.status_code}")
         print(f"[LOG] API response headers: {dict(response.headers)}")
         
@@ -189,12 +189,29 @@ def add_to_watchlist(user_id: str = DEFAULT_USER_ID, ticker: str = "",
             return {"ok": False, "error": "Unable to add ticker to watchlist at this time"}
             
     except requests.exceptions.ConnectionError:
-        print(f"[LOG] Connection error to API")
-        return {"ok": False, "error": "Unable to add ticker to watchlist at this time"}
+        print(f"[LOG] Connection error to API - falling back to local storage")
+        # Fallback to local storage
+        local_watchlist = _wl(user_id)
+        local_watchlist[ticker] = {"note": note, "added_at": "local_fallback"}
+        print(f"[LOG] Successfully added {ticker} to local watchlist")
+        return {
+            "ok": True,
+            "message": f"Successfully added {ticker} to local watchlist (external API unavailable)",
+            "source": "local_fallback",
+            "note": "External API unavailable, data stored locally"
+        }
     except Exception as e:
-        print(f"[LOG] Unexpected error: {str(e)}")
-        print(f"[LOG] Tool returning error response for exception")
-        return {"ok": False, "error": "Unable to add ticker to watchlist at this time"}
+        print(f"[LOG] Unexpected error: {str(e)} - falling back to local storage")
+        # Fallback to local storage
+        local_watchlist = _wl(user_id)
+        local_watchlist[ticker] = {"note": note, "added_at": "local_fallback"}
+        print(f"[LOG] Successfully added {ticker} to local watchlist")
+        return {
+            "ok": True,
+            "message": f"Successfully added {ticker} to local watchlist (external API error)",
+            "source": "local_fallback",
+            "note": "External API error, data stored locally"
+        }
 
 @tool("remove_from_watchlist", args_schema=RemoveWatchlistInput)
 def remove_from_watchlist(user_id: str = DEFAULT_USER_ID, ticker: str = ""):
@@ -218,7 +235,7 @@ def remove_from_watchlist(user_id: str = DEFAULT_USER_ID, ticker: str = ""):
         
         # First, get the watchlist to find the entry ID
         list_url = f"{WATCHLIST_API_URL}?user_id={user_id}"
-        list_response = requests.get(list_url)
+        list_response = requests.get(list_url, timeout=10)
         print(f"[LOG] List API response status: {list_response.status_code}")
         
         if list_response.status_code != 200:
@@ -228,8 +245,9 @@ def remove_from_watchlist(user_id: str = DEFAULT_USER_ID, ticker: str = ""):
         list_data = list_response.json()
         entry_id = None
         
-        # Find the entry with matching ticker
-        for item in list_data.get("items", []):
+        # Find the entry with matching ticker - handle both "items" and "watchlists" fields
+        items = list_data.get("items", list_data.get("watchlists", []))
+        for item in items:
             if item.get("ticker") == ticker:
                 entry_id = item.get("id") or item.get("watchlist_id")
                 break
@@ -242,7 +260,7 @@ def remove_from_watchlist(user_id: str = DEFAULT_USER_ID, ticker: str = ""):
         
         # Delete the entry
         delete_url = f"{WATCHLIST_API_URL.rstrip('/')}/{entry_id}"
-        delete_response = requests.delete(delete_url)
+        delete_response = requests.delete(delete_url, timeout=10)
         print(f"[LOG] Delete API response status: {delete_response.status_code}")
         
         if delete_response.status_code == 200:
@@ -278,30 +296,91 @@ def list_watchlist(user_id: str = DEFAULT_USER_ID):
         
         # Make HTTP request to the watchlist API
         api_url = f"{WATCHLIST_API_URL}?user_id={user_id}"
-        response = requests.get(api_url)
+        response = requests.get(api_url, timeout=10)  # 10 second timeout
         print(f"[LOG] API response status: {response.status_code}")
         
         if response.status_code == 200:
             result = response.json()
-            print(f"[LOG] API response success, found {result.get('total', 0)} items")
+            print(f"[LOG] API response: {result}")
+            
+            # Validate the response structure - handle both "items" and "watchlists" fields
+            items = result.get("items", result.get("watchlists", []))
+            total_count = result.get("total", 0)
+            
+            # Check for data inconsistency
+            if total_count > 0 and (not items or len(items) == 0):
+                print(f"[LOG] Data inconsistency detected: total={total_count}, items={len(items) if items else 0}")
+                return {
+                    "ok": False,
+                    "error": f"Data inconsistency detected: API reports {total_count} items but returned empty list. This may be a temporary issue with the watchlist service.",
+                    "user_id": user_id,
+                    "api_total": total_count,
+                    "api_items_count": len(items) if items else 0
+                }
+            
+            print(f"[LOG] API response success, found {len(items)} items")
             return {
                 "ok": True,
-                "watchlist": result.get("items", []),
-                "count": result.get("total", 0),
+                "watchlist": items,
+                "count": len(items),
                 "user_id": user_id
             }
         else:
-            print(f"[LOG] API response failed")
-            return {"ok": False, "error": "Unable to retrieve watchlist at this time"}
+            print(f"[LOG] API response failed with status {response.status_code}")
+            try:
+                error_detail = response.json()
+                print(f"[LOG] API error detail: {error_detail}")
+                return {"ok": False, "error": f"Watchlist API error: {error_detail.get('detail', 'Unknown error')}"}
+            except:
+                return {"ok": False, "error": f"Unable to retrieve watchlist (HTTP {response.status_code})"}
         
     except requests.exceptions.ConnectionError:
-        print(f"[LOG] Connection error to API")
-        return {"ok": False, "error": "Unable to retrieve watchlist at this time"}
+        print(f"[LOG] Connection error to API - falling back to local storage")
+        # Fallback to local storage
+        local_watchlist = _wl(user_id)
+        if local_watchlist:
+            return {
+                "ok": True,
+                "watchlist": list(local_watchlist.values()),
+                "count": len(local_watchlist),
+                "user_id": user_id,
+                "source": "local_fallback",
+                "note": "External API unavailable, using local data"
+            }
+        else:
+            return {"ok": False, "error": "Unable to connect to watchlist service and no local data available. Please check if the service is running."}
+    except requests.exceptions.Timeout:
+        print(f"[LOG] Timeout error to API - falling back to local storage")
+        # Fallback to local storage
+        local_watchlist = _wl(user_id)
+        if local_watchlist:
+            return {
+                "ok": True,
+                "watchlist": list(local_watchlist.values()),
+                "count": len(local_watchlist),
+                "user_id": user_id,
+                "source": "local_fallback",
+                "note": "External API timeout, using local data"
+            }
+        else:
+            return {"ok": False, "error": "Watchlist service request timed out and no local data available. Please try again."}
     except Exception as e:
-        print(f"[LOG] Unexpected error: {str(e)}")
-        return {"ok": False, "error": "Unable to retrieve watchlist at this time"}
+        print(f"[LOG] Unexpected error: {str(e)} - falling back to local storage")
+        # Fallback to local storage
+        local_watchlist = _wl(user_id)
+        if local_watchlist:
+            return {
+                "ok": True,
+                "watchlist": list(local_watchlist.values()),
+                "count": len(local_watchlist),
+                "user_id": user_id,
+                "source": "local_fallback",
+                "note": "External API error, using local data"
+            }
+        else:
+            return {"ok": False, "error": f"Unexpected error retrieving watchlist and no local data available: {str(e)}"}
 
-@tool("get_watchlist_entry", args_schema=ListWatchlistInput)
+@tool("get_watchlist_entry", args_schema=GetWatchlistEntryInput)
 def get_watchlist_entry(user_id: str = DEFAULT_USER_ID, ticker: str = ""):
     """Get a specific watchlist entry by ticker for a user by calling the watchlist API."""
     try:
@@ -323,14 +402,30 @@ def get_watchlist_entry(user_id: str = DEFAULT_USER_ID, ticker: str = ""):
         
         # Make HTTP request to the watchlist API
         api_url = f"{WATCHLIST_API_URL}?user_id={user_id}"
-        response = requests.get(api_url)
+        response = requests.get(api_url, timeout=10)  # 10 second timeout
         print(f"[LOG] API response status: {response.status_code}")
         
         if response.status_code == 200:
             result = response.json()
+            print(f"[LOG] API response: {result}")
+            
+            # Validate the response structure - handle both "items" and "watchlists" fields
+            items = result.get("items", result.get("watchlists", []))
+            total_count = result.get("total", 0)
+            
+            # Check for data inconsistency
+            if total_count > 0 and (not items or len(items) == 0):
+                print(f"[LOG] Data inconsistency detected: total={total_count}, items={len(items) if items else 0}")
+                return {
+                    "ok": False,
+                    "error": f"Data inconsistency detected: API reports {total_count} items but returned empty list. This may be a temporary issue with the watchlist service.",
+                    "user_id": user_id,
+                    "api_total": total_count,
+                    "api_items_count": len(items) if items else 0
+                }
             
             # Find the entry with matching ticker
-            for item in result.get("items", []):
+            for item in items:
                 if item.get("ticker") == ticker:
                     print(f"[LOG] Found entry for ticker {ticker}")
                     return {
@@ -346,8 +441,13 @@ def get_watchlist_entry(user_id: str = DEFAULT_USER_ID, ticker: str = ""):
                 "user_id": user_id
             }
         else:
-            print(f"[LOG] API response failed")
-            return {"ok": False, "error": "Unable to retrieve watchlist entry at this time"}
+            print(f"[LOG] API response failed with status {response.status_code}")
+            try:
+                error_detail = response.json()
+                print(f"[LOG] API error detail: {error_detail}")
+                return {"ok": False, "error": f"Watchlist API error: {error_detail.get('detail', 'Unknown error')}"}
+            except:
+                return {"ok": False, "error": f"Unable to retrieve watchlist entry (HTTP {response.status_code})"}
         
     except requests.exceptions.ConnectionError:
         print(f"[LOG] Connection error to API")

@@ -35,6 +35,10 @@ class RemoveWatchlistInput(BaseModel):
 class ListWatchlistInput(BaseModel):
     user_id: str = Field(default="f00dc8bd-eabc-4143-b1f0-fbcb9715a02e")
 
+class GetWatchlistEntryInput(BaseModel):
+    user_id: str = Field(default="f00dc8bd-eabc-4143-b1f0-fbcb9715a02e")
+    ticker: Ticker
+
 class GetNewsInput(BaseModel):
     user_id: str = Field(default="f00dc8bd-eabc-4143-b1f0-fbcb9715a02e")
     ticker: Ticker
