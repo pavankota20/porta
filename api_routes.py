@@ -27,6 +27,15 @@ def clean_agent_response(result: Any) -> str:
     print(f"[DEBUG] Raw agent result: {result}")
     print(f"[DEBUG] Result type: {type(result)}")
     
+    # Convert result to string first to handle all cases
+    result_str = str(result)
+    print(f"[DEBUG] Result as string: {result_str}")
+    
+    # Check if the result string contains JSON-like structures
+    if "'text':" in result_str or '"text":' in result_str:
+        print(f"[DEBUG] Detected text field in result string")
+        return _extract_text_from_nested_content(result_str)
+    
     if isinstance(result, dict):
         if "output" in result:
             output = result["output"]
@@ -76,6 +85,34 @@ def _extract_text_from_nested_content(text_content: str) -> str:
     
     print(f"[DEBUG] Extracting text from: {text_content}")
     
+    # First, try to handle the case where the content looks like a Python repr of a list
+    # This handles cases like "[{'text': '...', 'type': 'text', 'index': 0}]"
+    if text_content.startswith("[{") and text_content.endswith("}]"):
+        print(f"[DEBUG] Detected Python repr of list, trying to extract text")
+        try:
+            # Try to evaluate it as Python literal (safer than eval)
+            import ast
+            parsed_content = ast.literal_eval(text_content)
+            print(f"[DEBUG] Successfully parsed with ast.literal_eval: {parsed_content}")
+            
+            if isinstance(parsed_content, list) and len(parsed_content) > 0:
+                first_item = parsed_content[0]
+                print(f"[DEBUG] First parsed item: {first_item}")
+                if isinstance(first_item, dict) and "text" in first_item:
+                    final_text = first_item["text"]
+                    print(f"[DEBUG] Extracted final text: {final_text}")
+                    return final_text
+                else:
+                    final_text = str(first_item)
+                    print(f"[DEBUG] Converted first item to string: {final_text}")
+                    return final_text
+            else:
+                final_text = str(parsed_content)
+                print(f"[DEBUG] Converted parsed content to string: {final_text}")
+                return final_text
+        except (ValueError, SyntaxError) as e:
+            print(f"[DEBUG] ast.literal_eval failed: {e}, trying JSON parsing")
+    
     # Check if it looks like a JSON string
     text_content = text_content.strip()
     if (text_content.startswith('[') and text_content.endswith(']')) or \
@@ -104,9 +141,24 @@ def _extract_text_from_nested_content(text_content: str) -> str:
                 print(f"[DEBUG] Converted parsed content to string: {final_text}")
                 return final_text
         except (json.JSONDecodeError, ValueError) as e:
-            print(f"[DEBUG] JSON parsing failed: {e}, returning original content")
-            # If parsing fails, return the original content
-            pass
+            print(f"[DEBUG] JSON parsing failed: {e}, trying ast.literal_eval")
+            try:
+                import ast
+                parsed_content = ast.literal_eval(text_content)
+                print(f"[DEBUG] Successfully parsed with ast.literal_eval: {parsed_content}")
+                
+                if isinstance(parsed_content, list) and len(parsed_content) > 0:
+                    first_item = parsed_content[0]
+                    if isinstance(first_item, dict) and "text" in first_item:
+                        return first_item["text"]
+                    else:
+                        return str(first_item)
+                elif isinstance(parsed_content, dict) and "text" in parsed_content:
+                    return parsed_content["text"]
+                else:
+                    return str(parsed_content)
+            except (ValueError, SyntaxError) as e2:
+                print(f"[DEBUG] ast.literal_eval also failed: {e2}")
     
     print(f"[DEBUG] No JSON detected, returning original content: {text_content}")
     return text_content
