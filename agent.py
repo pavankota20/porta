@@ -8,14 +8,14 @@ import os
 import sys
 import asyncio
 from typing import List
-import uvicorn
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+import uvicorn # type: ignore
+from fastapi import FastAPI # type: ignore
+from fastapi.middleware.cors import CORSMiddleware # type: ignore
 
 # LangChain imports
-from langchain_anthropic import ChatAnthropic
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.agents import AgentExecutor, create_tool_calling_agent
+from langchain_anthropic import ChatAnthropic # type: ignore
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder # type: ignore
+from langchain.agents import AgentExecutor, create_tool_calling_agent # type: ignore
 
 # Local imports
 from config import (
@@ -168,7 +168,7 @@ def test_watchlist_tool():
     print("Testing add_to_watchlist function...")
     
     # Import the requests module to test the API call
-    import requests
+    import requests # type: ignore
     from config import DEFAULT_USER_ID, WATCHLIST_API_URL
     
     user_id = DEFAULT_USER_ID

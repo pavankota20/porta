@@ -4,8 +4,8 @@ LangChain tools for Porta Finance Assistant
 """
 
 from typing import Optional
-from langchain_core.tools import tool
-import requests
+from langchain_core.tools import tool # type: ignore
+import requests # type: ignore
 import json
 
 from config import DEFAULT_USER_ID, PORTFOLIO, WATCHLIST, DOC_CACHE, WATCHLIST_API_URL
