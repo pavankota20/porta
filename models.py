@@ -57,11 +57,13 @@ class WebSearchInput(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(..., description="User's message/prompt")
     user_id: str = Field(default="f00dc8bd-eabc-4143-b1f0-fbcb9715a02e", description="User identifier")
+    session_id: Optional[str] = Field(None, description="Chat session ID (optional, will create new if not provided)")
     chat_history: List[Dict[str, str]] = Field(default=[], description="Previous chat history")
 
 class ChatResponse(BaseModel):
     response: str = Field(..., description="Agent's response")
     user_id: str = Field(..., description="User identifier")
+    session_id: str = Field(..., description="Chat session ID")
     status: str = Field(default="success", description="Response status")
 
 class AsyncChatRequest(BaseModel):

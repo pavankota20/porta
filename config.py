@@ -19,6 +19,14 @@ except ImportError:
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-7-sonnet-20250219")
 
+# ====== Database Configuration ======
+POSTGRES_SERVER = os.getenv("POSTGRES_SERVER", "ep-odd-base-ad9j1zcs-pooler.c-2.us-east-1.aws.neon.tech")
+POSTGRES_USER = os.getenv("POSTGRES_USER", "neondb_owner")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "npg_AW2xns1lzOBD")
+POSTGRES_DB = os.getenv("POSTGRES_DB", "neondb")
+POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://neondb_owner:npg_AW2xns1lzOBD@ep-odd-base-ad9j1zcs-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require")
+
 # ====== Server Configuration ======
 HOST = "127.0.0.1"
 PORT = 8001

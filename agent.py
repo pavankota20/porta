@@ -29,7 +29,7 @@ from models import (
 from tools import TOOLS
 from api_routes import (
     root, health_check, chat_with_agent, chat_with_agent_async,
-    get_request_status, list_active_requests, get_user_portfolio, get_user_watchlist
+    get_request_status, list_active_requests, get_user_sessions, get_session_messages, close_chat_session
 )
 from request_processor import process_request_queue
 
@@ -107,13 +107,17 @@ async def api_get_request_status(request_id: str):
 async def api_list_active_requests():
     return await list_active_requests()
 
-@app.get("/portfolio/{user_id}")
-async def api_get_user_portfolio(user_id: str):
-    return await get_user_portfolio(user_id)
+@app.get("/sessions/{user_id}")
+async def api_get_user_sessions(user_id: str):
+    return await get_user_sessions(user_id)
 
-@app.get("/watchlist/{user_id}")
-async def api_get_user_watchlist(user_id: str):
-    return await get_user_watchlist(user_id)
+@app.get("/sessions/{session_id}/messages")
+async def api_get_session_messages(session_id: str, user_id: str):
+    return await get_session_messages(session_id, user_id)
+
+@app.delete("/sessions/{session_id}")
+async def api_close_chat_session(session_id: str, user_id: str):
+    return await close_chat_session(session_id, user_id)
 
 # ====== Interactive Mode ======
 def run_interactive():
@@ -227,6 +231,16 @@ if __name__ == "__main__":
         async def startup_event():
             """Initialize background tasks on startup"""
             print("✅ Porta Finance Assistant API is ready!")
+            
+            # Initialize database service
+            try:
+                from database import init_db
+                await init_db()
+                print("✅ Database service initialized!")
+            except Exception as e:
+                print(f"❌ Failed to initialize database: {e}")
+                print("⚠️  Chat sessions and messages may not work")
+            
             asyncio.create_task(process_request_queue())
             print("✅ Async request processor started!")
             
@@ -243,6 +257,16 @@ if __name__ == "__main__":
                     print("⚠️  AI features may not work")
             
             asyncio.create_task(init_agent())
+        
+        @app.on_event("shutdown")
+        async def shutdown_event():
+            """Cleanup on shutdown"""
+            try:
+                from database import cleanup_db
+                await cleanup_db()
+                print("✅ Database service cleaned up!")
+            except Exception as e:
+                print(f"⚠️  Error during database cleanup: {e}")
         
         print("🚀 Starting Porta Finance Assistant API...")
         print("✅ Async processing enabled - supports multiple concurrent requests!")

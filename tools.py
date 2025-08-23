@@ -8,7 +8,7 @@ from langchain_core.tools import tool # type: ignore
 import requests # type: ignore
 import json
 
-from config import DEFAULT_USER_ID, PORTFOLIO, WATCHLIST, DOC_CACHE, WATCHLIST_API_URL, PORTFOLIO_API_URL
+from config import DEFAULT_USER_ID, DOC_CACHE, WATCHLIST_API_URL, PORTFOLIO_API_URL
 from models import (
     AddPortfolioInput, RemovePortfolioInput, ListPortfolioInput, GetPortfolioSummaryInput,
     AddWatchlistInput, RemoveWatchlistInput, ListWatchlistInput, GetWatchlistEntryInput,
@@ -16,13 +16,7 @@ from models import (
 )
 
 # ====== Helper Functions ======
-def _pf(user_id: str):
-    """Get user portfolio, create if doesn't exist"""
-    return PORTFOLIO.setdefault(user_id, {})
-
-def _wl(user_id: str):
-    """Get user watchlist, create if doesn't exist"""
-    return WATCHLIST.setdefault(user_id, {})
+# Database functions are now handled by database.py service
 
 # ====== Portfolio Tools ======
 @tool("add_to_portfolio", args_schema=AddPortfolioInput)
@@ -106,29 +100,11 @@ def add_to_portfolio(user_id: str = DEFAULT_USER_ID, ticker: str = "",
             return {"ok": False, "error": "Unable to add ticker to portfolio at this time"}
             
     except requests.exceptions.ConnectionError:
-        print(f"[LOG] Connection error to API - falling back to local storage")
-        # Fallback to local storage
-        local_portfolio = _pf(user_id)
-        local_portfolio[ticker] = {"quantity": quantity, "buy_price": buy_price, "note": note, "added_at": "local_fallback"}
-        print(f"[LOG] Successfully added {ticker} to local portfolio")
-        return {
-            "ok": True,
-            "message": f"Successfully added {ticker} to local portfolio (external API unavailable)",
-            "source": "local_fallback",
-            "note": "External API unavailable, data stored locally"
-        }
+        print(f"[LOG] Connection error to API")
+        return {"ok": False, "error": "Unable to connect to portfolio service. Please check if the service is running."}
     except Exception as e:
-        print(f"[LOG] Unexpected error: {str(e)} - falling back to local storage")
-        # Fallback to local storage
-        local_portfolio = _pf(user_id)
-        local_portfolio[ticker] = {"quantity": quantity, "buy_price": buy_price, "note": note, "added_at": "local_fallback"}
-        print(f"[LOG] Successfully added {ticker} to local portfolio")
-        return {
-            "ok": True,
-            "message": f"Successfully added {ticker} to local portfolio (external API error)",
-            "source": "local_fallback",
-            "note": "External API error, data stored locally"
-        }
+        print(f"[LOG] Unexpected error: {str(e)}")
+        return {"ok": False, "error": f"Unexpected error adding to portfolio: {str(e)}"}
 
 @tool("remove_from_portfolio", args_schema=RemovePortfolioInput)
 def remove_from_portfolio(user_id: str = DEFAULT_USER_ID, ticker: str = ""):
@@ -191,33 +167,11 @@ def remove_from_portfolio(user_id: str = DEFAULT_USER_ID, ticker: str = ""):
             return {"ok": False, "error": "Unable to remove ticker from portfolio"}
             
     except requests.exceptions.ConnectionError:
-        print(f"[LOG] Connection error to API - falling back to local storage")
-        # Fallback to local storage
-        local_portfolio = _pf(user_id)
-        if ticker in local_portfolio:
-            local_portfolio.pop(ticker)
-            print(f"[LOG] Successfully removed {ticker} from local portfolio")
-            return {
-                "ok": True,
-                "message": f"Successfully removed {ticker} from local portfolio (external API unavailable)",
-                "source": "local_fallback"
-            }
-        else:
-            return {"ok": False, "error": f"Ticker {ticker} not found in local portfolio"}
+        print(f"[LOG] Connection error to API")
+        return {"ok": False, "error": "Unable to connect to portfolio service. Please check if the service is running."}
     except Exception as e:
-        print(f"[LOG] Unexpected error: {str(e)} - falling back to local storage")
-        # Fallback to local storage
-        local_portfolio = _pf(user_id)
-        if ticker in local_portfolio:
-            local_portfolio.pop(ticker)
-            print(f"[LOG] Successfully removed {ticker} from local portfolio")
-            return {
-                "ok": True,
-                "message": f"Successfully removed {ticker} from local portfolio (external API error)",
-                "source": "local_fallback"
-            }
-        else:
-            return {"ok": False, "error": f"Ticker {ticker} not found in local portfolio"}
+        print(f"[LOG] Unexpected error: {str(e)}")
+        return {"ok": False, "error": f"Unexpected error removing from portfolio: {str(e)}"}
 
 @tool("list_portfolio", args_schema=ListPortfolioInput)
 def list_portfolio(user_id: str = DEFAULT_USER_ID):
@@ -274,50 +228,14 @@ def list_portfolio(user_id: str = DEFAULT_USER_ID):
                 return {"ok": False, "error": f"Unable to retrieve portfolio (HTTP {response.status_code})"}
         
     except requests.exceptions.ConnectionError:
-        print(f"[LOG] Connection error to API - falling back to local storage")
-        # Fallback to local storage
-        local_portfolio = _pf(user_id)
-        if local_portfolio:
-            return {
-                "ok": True,
-                "portfolio": local_portfolio,
-                "portfolio_count": len(local_portfolio),
-                "user_id": user_id,
-                "source": "local_fallback",
-                "note": "External API unavailable, using local data"
-            }
-        else:
-            return {"ok": False, "error": "Unable to connect to portfolio service and no local data available. Please check if the service is running."}
+        print(f"[LOG] Connection error to API")
+        return {"ok": False, "error": "Unable to connect to portfolio service. Please check if the service is running."}
     except requests.exceptions.Timeout:
-        print(f"[LOG] Timeout error to API - falling back to local storage")
-        # Fallback to local storage
-        local_portfolio = _pf(user_id)
-        if local_portfolio:
-            return {
-                "ok": True,
-                "portfolio": local_portfolio,
-                "portfolio_count": len(local_portfolio),
-                "user_id": user_id,
-                "source": "local_fallback",
-                "note": "External API timeout, using local data"
-            }
-        else:
-            return {"ok": False, "error": "Portfolio service request timed out and no local data available. Please try again."}
+        print(f"[LOG] Timeout error to API")
+        return {"ok": False, "error": "Portfolio service request timed out. Please try again."}
     except Exception as e:
-        print(f"[LOG] Unexpected error: {str(e)} - falling back to local storage")
-        # Fallback to local storage
-        local_portfolio = _pf(user_id)
-        if local_portfolio:
-            return {
-                "ok": True,
-                "portfolio": local_portfolio,
-                "portfolio_count": len(local_portfolio),
-                "user_id": user_id,
-                "source": "local_fallback",
-                "note": "External API error, using local data"
-            }
-        else:
-            return {"ok": False, "error": f"Unexpected error retrieving portfolio and no local data available: {str(e)}"}
+        print(f"[LOG] Unexpected error: {str(e)}")
+        return {"ok": False, "error": f"Unexpected error retrieving portfolio: {str(e)}"}
 
 @tool("get_portfolio_summary", args_schema=GetPortfolioSummaryInput)
 def get_portfolio_summary(user_id: str = DEFAULT_USER_ID, include_pnl: bool = True):
@@ -357,74 +275,14 @@ def get_portfolio_summary(user_id: str = DEFAULT_USER_ID, include_pnl: bool = Tr
                 return {"ok": False, "error": f"Unable to retrieve portfolio summary (HTTP {response.status_code})"}
         
     except requests.exceptions.ConnectionError:
-        print(f"[LOG] Connection error to API - falling back to local storage")
-        # Fallback to local storage
-        local_portfolio = _pf(user_id)
-        if local_portfolio:
-            # Create a simple summary from local data
-            summary = []
-            for ticker, data in local_portfolio.items():
-                summary.append({
-                    "ticker": ticker,
-                    "note": data.get("note", "No note"),
-                    "source": "local_fallback"
-                })
-            return {
-                "ok": True,
-                "summary": summary,
-                "user_id": user_id,
-                "include_pnl": False,
-                "source": "local_fallback",
-                "note": "External API unavailable, using local data"
-            }
-        else:
-            return {"ok": False, "error": "Unable to connect to portfolio service and no local data available. Please check if the service is running."}
+        print(f"[LOG] Connection error to API")
+        return {"ok": False, "error": "Unable to connect to portfolio service. Please check if the service is running."}
     except requests.exceptions.Timeout:
-        print(f"[LOG] Timeout error to API - falling back to local storage")
-        # Fallback to local storage
-        local_portfolio = _pf(user_id)
-        if local_portfolio:
-            # Create a simple summary from local data
-            summary = []
-            for ticker, data in local_portfolio.items():
-                summary.append({
-                    "ticker": ticker,
-                    "note": data.get("note", "No note"),
-                    "source": "local_fallback"
-                })
-            return {
-                "ok": True,
-                "summary": summary,
-                "user_id": user_id,
-                "include_pnl": False,
-                "source": "local_fallback",
-                "note": "External API timeout, using local data"
-            }
-        else:
-            return {"ok": False, "error": "Portfolio service request timed out and no local data available. Please try again."}
+        print(f"[LOG] Timeout error to API")
+        return {"ok": False, "error": "Portfolio service request timed out. Please try again."}
     except Exception as e:
-        print(f"[LOG] Unexpected error: {str(e)} - falling back to local storage")
-        # Fallback to local storage
-        local_portfolio = _pf(user_id)
-        if local_portfolio:
-            # Create a simple summary from local data
-            summary = []
-            for ticker, data in local_portfolio.items():
-                summary.append({
-                    "ticker": ticker,
-                    "note": data.get("note", "No note"),
-                    "source": "local_fallback"
-                })
-            return {
-                "ok": True,
-                "summary": summary,
-                "user_id": user_id,
-                "include_pnl": False,
-                "source": "local_fallback",
-                "note": "External API error, using local data"
-            }
-        else:
-            return {"ok": False, "error": f"Unexpected error retrieving portfolio summary and no local data available: {str(e)}"}
+        print(f"[LOG] Unexpected error: {str(e)}")
+        return {"ok": False, "error": f"Unexpected error retrieving portfolio summary: {str(e)}"}
 
 # ====== Watchlist Tools ======
 @tool("add_to_watchlist", args_schema=AddWatchlistInput)
@@ -480,29 +338,11 @@ def add_to_watchlist(user_id: str = DEFAULT_USER_ID, ticker: str = "",
             return {"ok": False, "error": "Unable to add ticker to watchlist at this time"}
             
     except requests.exceptions.ConnectionError:
-        print(f"[LOG] Connection error to API - falling back to local storage")
-        # Fallback to local storage
-        local_watchlist = _wl(user_id)
-        local_watchlist[ticker] = {"note": note, "added_at": "local_fallback"}
-        print(f"[LOG] Successfully added {ticker} to local watchlist")
-        return {
-            "ok": True,
-            "message": f"Successfully added {ticker} to local watchlist (external API unavailable)",
-            "source": "local_fallback",
-            "note": "External API unavailable, data stored locally"
-        }
+        print(f"[LOG] Connection error to API")
+        return {"ok": False, "error": "Unable to connect to watchlist service. Please check if the service is running."}
     except Exception as e:
-        print(f"[LOG] Unexpected error: {str(e)} - falling back to local storage")
-        # Fallback to local storage
-        local_watchlist = _wl(user_id)
-        local_watchlist[ticker] = {"note": note, "added_at": "local_fallback"}
-        print(f"[LOG] Successfully added {ticker} to local watchlist")
-        return {
-            "ok": True,
-            "message": f"Successfully added {ticker} to local watchlist (external API error)",
-            "source": "local_fallback",
-            "note": "External API error, data stored locally"
-        }
+        print(f"[LOG] Unexpected error: {str(e)}")
+        return {"ok": False, "error": f"Unexpected error adding to watchlist: {str(e)}"}
 
 @tool("remove_from_watchlist", args_schema=RemoveWatchlistInput)
 def remove_from_watchlist(user_id: str = DEFAULT_USER_ID, ticker: str = ""):
@@ -626,50 +466,14 @@ def list_watchlist(user_id: str = DEFAULT_USER_ID):
                 return {"ok": False, "error": f"Unable to retrieve watchlist (HTTP {response.status_code})"}
         
     except requests.exceptions.ConnectionError:
-        print(f"[LOG] Connection error to API - falling back to local storage")
-        # Fallback to local storage
-        local_watchlist = _wl(user_id)
-        if local_watchlist:
-            return {
-                "ok": True,
-                "watchlist": list(local_watchlist.values()),
-                "count": len(local_watchlist),
-                "user_id": user_id,
-                "source": "local_fallback",
-                "note": "External API unavailable, using local data"
-            }
-        else:
-            return {"ok": False, "error": "Unable to connect to watchlist service and no local data available. Please check if the service is running."}
+        print(f"[LOG] Connection error to API")
+        return {"ok": False, "error": "Unable to connect to watchlist service. Please check if the service is running."}
     except requests.exceptions.Timeout:
-        print(f"[LOG] Timeout error to API - falling back to local storage")
-        # Fallback to local storage
-        local_watchlist = _wl(user_id)
-        if local_watchlist:
-            return {
-                "ok": True,
-                "watchlist": list(local_watchlist.values()),
-                "count": len(local_watchlist),
-                "user_id": user_id,
-                "source": "local_fallback",
-                "note": "External API timeout, using local data"
-            }
-        else:
-            return {"ok": False, "error": "Watchlist service request timed out and no local data available. Please try again."}
+        print(f"[LOG] Timeout error to API")
+        return {"ok": False, "error": "Watchlist service request timed out. Please try again."}
     except Exception as e:
-        print(f"[LOG] Unexpected error: {str(e)} - falling back to local storage")
-        # Fallback to local storage
-        local_watchlist = _wl(user_id)
-        if local_watchlist:
-            return {
-                "ok": True,
-                "watchlist": list(local_watchlist.values()),
-                "count": len(local_watchlist),
-                "user_id": user_id,
-                "source": "local_fallback",
-                "note": "External API error, using local data"
-            }
-        else:
-            return {"ok": False, "error": f"Unexpected error retrieving watchlist and no local data available: {str(e)}"}
+        print(f"[LOG] Unexpected error: {str(e)}")
+        return {"ok": False, "error": f"Unexpected error retrieving watchlist: {str(e)}"}
 
 @tool("get_watchlist_entry", args_schema=GetWatchlistEntryInput)
 def get_watchlist_entry(user_id: str = DEFAULT_USER_ID, ticker: str = ""):
