@@ -32,6 +32,11 @@ HOST = "127.0.0.1"
 PORT = 8001
 WATCHLIST_API_URL = "http://localhost:8000/api/v1/watchlist/"
 PORTFOLIO_API_URL = "http://localhost:8000/api/v1/portfolio/"
+WEB_SEARCH_API_URL = "http://localhost:8000/api/v1/web-search/"
+
+# ====== Web Search Configuration ======
+BRAVE_SEARCH_API_KEY = os.getenv("BRAVE_SEARCH_API_KEY")
+BRAVE_SEARCH_BASE_URL = os.getenv("BRAVE_SEARCH_BASE_URL", "https://api.search.brave.com/res/v1/web/search")
 
 # ====== Request Processing Configuration ======
 MAX_CONCURRENT_REQUESTS = 5

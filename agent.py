@@ -11,11 +11,12 @@ from typing import List
 import uvicorn # type: ignore
 from fastapi import FastAPI # type: ignore
 from fastapi.middleware.cors import CORSMiddleware # type: ignore
+from fastapi.exceptions import HTTPException # type: ignore
 
 # LangChain imports
 from langchain_anthropic import ChatAnthropic # type: ignore
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder # type: ignore
-from langchain.agents import AgentExecutor, create_tool_calling_agent # type: ignore
+from langchain.agents import create_tool_calling_agent, AgentExecutor # type: ignore
 
 # Local imports
 from config import (
@@ -24,7 +25,7 @@ from config import (
 )
 from models import (
     ChatRequest, ChatResponse, AsyncChatRequest, AsyncChatResponse,
-    RequestStatusResponse
+    RequestStatusResponse, WebSearchInput
 )
 from tools import TOOLS
 from api_routes import (
@@ -47,13 +48,18 @@ def build_agent():
     
     prompt = ChatPromptTemplate.from_messages([
         ("system", SYSTEM_PROMPT),
-        MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}"),
         MessagesPlaceholder(variable_name="agent_scratchpad"),
     ])
     
     agent = create_tool_calling_agent(llm, TOOLS, prompt)
-    return AgentExecutor(agent=agent, tools=TOOLS, verbose=True)
+    return AgentExecutor(
+        agent=agent, 
+        tools=TOOLS, 
+        verbose=True,
+        handle_parsing_errors=True,
+        max_iterations=10
+    )
 
 # Global agent instance
 agent_executor = None
@@ -98,6 +104,99 @@ async def api_chat_with_agent(request: ChatRequest):
 @app.post("/chat/async", response_model=AsyncChatResponse)
 async def api_chat_with_agent_async(request: AsyncChatRequest):
     return await chat_with_agent_async(request)
+
+@app.post("/api/v1/web-search/")
+async def api_web_search(request: WebSearchInput):
+    """Web search endpoint that integrates with Brave Search API"""
+    try:
+        print(f"[LOG] Web search request: {request}")
+        
+        # Check if Brave Search API key is configured
+        from config import BRAVE_SEARCH_API_KEY, BRAVE_SEARCH_BASE_URL
+        
+        if not BRAVE_SEARCH_API_KEY:
+            raise HTTPException(
+                status_code=500, 
+                detail="Brave Search API key not configured. Please set BRAVE_SEARCH_API_KEY in your .env file."
+            )
+        
+        # Prepare the request to Brave Search API
+        import aiohttp
+        
+        brave_payload = {
+            "q": request.query,
+            "count": request.count,
+            "offset": request.offset,
+            "search_lang": request.search_lang,
+            "country": request.country,
+            "ui_lang": request.ui_lang,
+            "safesearch": request.safesearch
+        }
+        
+        # Add result filter if specified
+        if request.result_filter and request.result_filter != "web":
+            brave_payload["result_filter"] = request.result_filter
+        
+        print(f"[LOG] Making request to Brave Search API: {brave_payload}")
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                BRAVE_SEARCH_BASE_URL,
+                params=brave_payload,
+                headers={
+                    "Accept": "application/json",
+                    "X-Subscription-Token": BRAVE_SEARCH_API_KEY,
+                    "User-Agent": "Porta-Finance-Assistant/1.0"
+                },
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+                print(f"[LOG] Brave Search API response status: {response.status}")
+                
+                if response.status == 200:
+                    result = await response.json()
+                    print(f"[LOG] Brave Search API response success")
+                    return result
+                elif response.status == 401:
+                    raise HTTPException(
+                        status_code=401, 
+                        detail="Brave Search API authentication failed. Please check your API key."
+                    )
+                elif response.status == 429:
+                    raise HTTPException(
+                        status_code=429, 
+                        detail="Brave Search API rate limit exceeded. Please try again later."
+                    )
+                elif response.status == 400:
+                    error_detail = await response.json()
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Invalid search request: {error_detail.get('message', 'Unknown error')}"
+                    )
+                else:
+                    error_detail = await response.text()
+                    raise HTTPException(
+                        status_code=502, 
+                        detail=f"Brave Search API error (HTTP {response.status}): {error_detail}"
+                    )
+                    
+    except HTTPException:
+        raise
+    except aiohttp.ClientConnectorError:
+        raise HTTPException(
+            status_code=502, 
+            detail="Unable to connect to Brave Search API. Please check your internet connection."
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504, 
+            detail="Brave Search API request timed out. Please try again."
+        )
+    except Exception as e:
+        print(f"[ERROR] Web search error: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Unexpected error during web search: {str(e)}"
+        )
 
 @app.get("/chat/status/{request_id}", response_model=RequestStatusResponse)
 async def api_get_request_status(request_id: str):

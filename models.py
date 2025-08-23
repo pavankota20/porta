@@ -50,8 +50,14 @@ class GetNewsInput(BaseModel):
     lookback_days: int = Field(default=3, ge=1, le=30)
 
 class WebSearchInput(BaseModel):
-    query: str = Field(description="The search query to perform web search for")
-    max_results: Optional[int] = Field(default=5, description="Maximum number of results to return")
+    query: str = Field(..., description="Search query string (1-500 characters)")
+    result_filter: Optional[str] = Field(default="web", description="Filter results by type (web, news, videos, locations, faq, discussions, infobox, mixed, summarizer, rich)")
+    search_lang: Optional[str] = Field(default="en_US", description="Search language (e.g., en_US, fr_FR)")
+    country: Optional[str] = Field(default="US", description="Country code (e.g., US, FR)")
+    ui_lang: Optional[str] = Field(default="en", description="UI language (e.g., en, fr)")
+    count: Optional[int] = Field(default=10, ge=1, le=50, description="Number of results (1-50)")
+    offset: Optional[int] = Field(default=0, ge=0, description="Offset for pagination")
+    safesearch: Optional[str] = Field(default="moderate", description="Safe search setting (strict, moderate, off)")
 
 # ====== API Request/Response Models ======
 class ChatRequest(BaseModel):
