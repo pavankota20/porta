@@ -261,7 +261,7 @@ async def chat_with_agent(request: ChatRequest):
                 )
         
         # Get existing session messages for context (before adding new ones)
-        existing_messages = await db_service.get_session_messages(session_id, limit=50)
+        existing_messages = await db_service.get_session_messages(session_id, limit=100)
         
         # Convert existing messages to chat history format for the agent
         history = []
@@ -269,18 +269,56 @@ async def chat_with_agent(request: ChatRequest):
             if msg["role"] in ["user", "assistant"]:
                 history.append({"role": msg["role"], "content": msg["content"]})
         
-        # Calculate next sequence number
-        next_sequence = len(existing_messages) + 1
+        # Calculate next sequence number more robustly
+        # Find the highest sequence number in existing messages
+        max_sequence = 0
+        if existing_messages:
+            max_sequence = max(msg.get("sequence_number", 0) for msg in existing_messages)
+        
+        # Use the next available sequence number
+        next_sequence = max_sequence + 1
+        
+        print(f"[DEBUG] Session {session_id}: max_sequence={max_sequence}, next_sequence={next_sequence}")
         
         # Store user message FIRST
-        user_message_id = await db_service.store_message(
-            session_id=session_id,
-            user_id=request.user_id,
-            message_type="user",
-            content=request.message,
-            role="user",
-            sequence_number=next_sequence
-        )
+        try:
+            user_message_id = await db_service.store_message(
+                session_id=session_id,
+                user_id=request.user_id,
+                message_type="user",
+                content=request.message,
+                role="user",
+                sequence_number=next_sequence
+            )
+            print(f"[DEBUG] Stored user message with sequence {next_sequence}")
+        except Exception as e:
+            print(f"[ERROR] Failed to store user message: {str(e)}")
+            # Try to get a fresh sequence number
+            try:
+                # Get fresh count and try again
+                fresh_messages = await db_service.get_session_messages(session_id, limit=100)
+                fresh_max_sequence = max(msg.get("sequence_number", 0) for msg in fresh_messages) if fresh_messages else 0
+                fresh_next_sequence = fresh_max_sequence + 1
+                print(f"[DEBUG] Retrying with fresh sequence: {fresh_next_sequence}")
+                
+                user_message_id = await db_service.store_message(
+                    session_id=session_id,
+                    user_id=request.user_id,
+                    message_type="user",
+                    content=request.message,
+                    role="user",
+                    sequence_number=fresh_next_sequence
+                )
+                next_sequence = fresh_next_sequence
+                print(f"[DEBUG] Successfully stored user message with sequence {next_sequence}")
+            except Exception as retry_e:
+                print(f"[ERROR] Retry also failed: {str(retry_e)}")
+                return ChatResponse(
+                    response="I apologize, but there was an issue processing your request. Please try again.",
+                    user_id=request.user_id,
+                    session_id=session_id,
+                    status="database_error"
+                )
         
         # Create enhanced history that includes the current user message
         enhanced_history = history + [{"role": "user", "content": request.message}]
@@ -335,14 +373,38 @@ async def chat_with_agent(request: ChatRequest):
             response_text = str(response_text)
         
         # Store assistant response
-        assistant_message_id = await db_service.store_message(
-            session_id=session_id,
-            user_id=request.user_id,
-            message_type="assistant",
-            content=response_text,
-            role="assistant",
-            sequence_number=next_sequence + 1
-        )
+        try:
+            assistant_message_id = await db_service.store_message(
+                session_id=session_id,
+                user_id=request.user_id,
+                message_type="assistant",
+                content=response_text,
+                role="assistant",
+                sequence_number=next_sequence + 1
+            )
+            print(f"[DEBUG] Stored assistant message with sequence {next_sequence + 1}")
+        except Exception as e:
+            print(f"[ERROR] Failed to store assistant message: {str(e)}")
+            # Try to get a fresh sequence number for the assistant message
+            try:
+                fresh_messages = await db_service.get_session_messages(session_id, limit=100)
+                fresh_max_sequence = max(msg.get("sequence_number", 0) for msg in fresh_messages) if fresh_messages else 0
+                fresh_next_sequence = fresh_max_sequence + 1
+                print(f"[DEBUG] Retrying assistant message with fresh sequence: {fresh_next_sequence}")
+                
+                assistant_message_id = await db_service.store_message(
+                    session_id=session_id,
+                    user_id=request.user_id,
+                    message_type="assistant",
+                    content=response_text,
+                    role="assistant",
+                    sequence_number=fresh_next_sequence
+                )
+                print(f"[DEBUG] Successfully stored assistant message with sequence {fresh_next_sequence}")
+            except Exception as retry_e:
+                print(f"[ERROR] Assistant message retry also failed: {str(retry_e)}")
+                # Continue without storing the assistant message, but return the response
+                print(f"[WARNING] Could not store assistant message, but continuing with response")
         
         return ChatResponse(
             response=response_text,
