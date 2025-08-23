@@ -1,36 +1,27 @@
 import os
-import re
-import json
-import requests
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List, Tuple
-from pydantic import BaseModel, Field, constr
-
-# Load environment variables from .env file if it exists
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
+from typing import Optional, Dict, Any, List
+from pydantic import BaseModel, Field, constr # type: ignore
 
 # LangChain core + Anthropic
-from langchain_anthropic import ChatAnthropic
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.tools import tool
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain.agents import AgentExecutor, create_tool_calling_agent
-from langchain_core.callbacks import BaseCallbackHandler
+from langchain_anthropic import ChatAnthropic # type: ignore
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder # type: ignore
+from langchain_core.tools import tool # type: ignore
+from langchain.agents import AgentExecutor, create_tool_calling_agent # type: ignore        
+from langchain_core.callbacks import BaseCallbackHandler # type: ignore
 
 # ====== In-memory stores ======
 PORTFOLIO: Dict[str, Dict[str, Dict[str, Any]]] = {}  # user_id -> {ticker: {"weight":float|None,"note":str|None}}
 WATCHLIST: Dict[str, set] = {}                         # user_id -> set(tickers)
 DOC_CACHE: Dict[str, Any] = {}                         # Cache for various document types including news
 
+
 def _pf(user_id: str) -> Dict[str, Dict[str, Any]]:
     return PORTFOLIO.setdefault(user_id, {})
 
+
 def _wl(user_id: str) -> set:
     return WATCHLIST.setdefault(user_id, set())
+
 
 Ticker = constr(pattern=r"^[A-Za-z][A-Za-z0-9.\-]{0,9}$")
 
@@ -41,37 +32,46 @@ class AddPortfolioInput(BaseModel):
     weight: Optional[float] = None
     note: Optional[str] = None
 
+
 class RemovePortfolioInput(BaseModel):
     user_id: str = Field(default="demo_user")
     ticker: Ticker
 
+
 class ListPortfolioInput(BaseModel):
     user_id: str = Field(default="demo_user")
+
 
 class AddWatchlistInput(BaseModel):
     user_id: str = Field(default="demo_user")
     ticker: Ticker
     note: Optional[str] = None
 
+
 class RemoveWatchlistInput(BaseModel):
     user_id: str = Field(default="demo_user")
     ticker: Ticker
 
+
 class ListWatchlistInput(BaseModel):
     user_id: str = Field(default="demo_user")
+
 
 class GetNewsInput(BaseModel):
     user_id: str = Field(default="demo_user")
     ticker: Ticker
-    lookback_days: int = Field(default=3, ge=1, le=30, description="Number of days to look back for news")
+    lookback_days: int = Field(default=3, ge=1, le=30,
+                               description="Number of days to look back for news")
+
 
 @tool("add_to_portfolio", args_schema=AddPortfolioInput)
-def add_to_portfolio(user_id: str = "demo_user", ticker: str = "", 
+def add_to_portfolio(user_id: str = "demo_user", ticker: str = "",
                      weight: Optional[float] = None, note: Optional[str] = None):
     """Add or upsert a holding in the user's portfolio."""
     pf = _pf(user_id)
     pf[ticker] = {"weight": weight, "note": note}
     return {"ok": True, "portfolio": pf}
+
 
 @tool("remove_from_portfolio", args_schema=RemovePortfolioInput)
 def remove_from_portfolio(user_id: str = "demo_user", ticker: str = ""):
@@ -81,17 +81,21 @@ def remove_from_portfolio(user_id: str = "demo_user", ticker: str = ""):
     pf.pop(ticker, None)
     return {"ok": True, "removed": existed, "portfolio": pf}
 
+
 @tool("list_portfolio", args_schema=ListPortfolioInput)
 def list_portfolio(user_id: str = "demo_user"):
     """List all holdings in the user's portfolio."""
     return {"portfolio": _pf(user_id)}
 
+
 @tool("add_to_watchlist", args_schema=AddWatchlistInput)
-def add_to_watchlist(user_id: str = "demo_user", ticker: str = "", note: Optional[str] = None):
+def add_to_watchlist(user_id: str = "demo_user", ticker: str = "",
+                     note: Optional[str] = None):
     """Add a ticker to the user's watchlist."""
     wl = _wl(user_id)
     wl.add(ticker)
     return {"ok": True, "watchlist": sorted(wl)}
+
 
 @tool("remove_from_watchlist", args_schema=RemoveWatchlistInput)
 def remove_from_watchlist(user_id: str = "demo_user", ticker: str = ""):
@@ -101,6 +105,7 @@ def remove_from_watchlist(user_id: str = "demo_user", ticker: str = ""):
     wl.discard(ticker)
     return {"ok": True, "removed": existed, "watchlist": sorted(wl)}
 
+
 @tool("list_watchlist", args_schema=ListWatchlistInput)
 def list_watchlist(user_id: str = "demo_user"):
     """List all tickers in the user's watchlist."""
@@ -109,7 +114,9 @@ def list_watchlist(user_id: str = "demo_user"):
 # ====== Web Search Tool ======
 class WebSearchInput(BaseModel):
     query: str = Field(description="The search query to perform web search for")
-    max_results: Optional[int] = Field(default=5, description="Maximum number of results to return")
+    max_results: Optional[int] = Field(default=5,
+                                       description="Maximum number of results to return")
+
 
 @tool("web_search", args_schema=WebSearchInput)
 def web_search(query: str, max_results: int = 5):
@@ -125,7 +132,7 @@ def web_search(query: str, max_results: int = 5):
             },
             {
                 "title": f"Test Result 2 for: {query}",
-                "url": "https://example.com/result2", 
+                "url": "https://example.com/result2",
                 "snippet": f"Another test result showing that the web search tool is functioning properly for: {query}"
             }
         ],
@@ -133,6 +140,7 @@ def web_search(query: str, max_results: int = 5):
         "status": "test_mode",
         "message": "This is a test implementation. Real web search API will be integrated later."
     }
+
 
 @tool("get_news", args_schema=GetNewsInput)
 def get_news(user_id: str = "demo_user", ticker: str = "", lookback_days: int = 3):
@@ -184,6 +192,7 @@ def get_news(user_id: str = "demo_user", ticker: str = "", lookback_days: int = 
     
     return result
 
+
 TOOLS = [
     add_to_portfolio,
     remove_from_portfolio,
@@ -210,6 +219,7 @@ class ToolCallCallback(BaseCallbackHandler):
     def on_tool_error(self, error, **kwargs):
         print(f"   Error: {error}")
 
+
 SYSTEM = """You are Porta, a finance-focused assistant. Your job: manage a user's portfolio and watchlist.
 
 Rules:
@@ -222,6 +232,7 @@ Rules:
 
  {agent_scratchpad}
 """
+
 
 def build_agent():
     """Build a proper agent executor that can call tools"""
@@ -247,6 +258,7 @@ def build_agent():
     
     return agent_executor
 
+
 def run_interactive():
     agent = build_agent()
     print("=== Welcome to Porta - Your Finance Assistant ===")
@@ -264,7 +276,6 @@ def run_interactive():
     print("=" * 50)
 
     history: List[dict] = []
-    user_id = "demo_user"
 
     while True:
         try:
@@ -276,12 +287,6 @@ def run_interactive():
                 continue
 
             print("Porta: ", end="", flush=True)
-            
-            messages = [
-                SystemMessage(content="You are Porta, a finance assistant. Use tools to manage portfolios and watchlists. After calling a tool, provide a brief summary of what was done."),
-                *history,
-                HumanMessage(content=user_input)
-            ]
             
             result = agent.invoke({"input": user_input, "chat_history": history})
             
@@ -296,6 +301,7 @@ def run_interactive():
         except Exception as e:
             print(f"Error: {e}")
             print("Please try again.")
+
 
 def test_tool_calls():
     """Test function to quickly verify tool calls"""
@@ -318,6 +324,7 @@ def test_tool_calls():
         result = agent.invoke({"input": query, "chat_history": []})
         
         print(f"\nResponse: {result['output']}")
+
 
 if __name__ == "__main__":
     import sys
