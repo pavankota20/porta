@@ -8,6 +8,10 @@ pydantic>=2.0.0
 # HTTP requests for API calls
 requests>=2.31.0
 
+# FastAPI and server
+fastapi>=0.104.1
+uvicorn>=0.24.0
+
 # Environment management
 python-dotenv>=1.0.0
 
