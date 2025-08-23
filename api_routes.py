@@ -6,6 +6,7 @@ FastAPI routes for Porta Finance Assistant
 import asyncio
 import time
 import uuid
+import json
 from datetime import datetime
 from typing import Dict, Any
 
@@ -17,6 +18,65 @@ from models import (
     RequestStatusResponse
 )
 from database import db_service
+
+def clean_agent_response(result: Any) -> str:
+    """
+    Clean and normalize agent response to extract clean text content.
+    Handles nested JSON strings and various response formats.
+    """
+    if isinstance(result, dict):
+        if "output" in result:
+            return str(result["output"])
+        elif "text" in result:
+            return _extract_text_from_nested_content(result["text"])
+        elif "content" in result:
+            return str(result["content"])
+        else:
+            return str(result)
+    
+    elif isinstance(result, list) and len(result) > 0:
+        first_item = result[0]
+        if isinstance(first_item, dict):
+            if "text" in first_item:
+                return _extract_text_from_nested_content(first_item["text"])
+            elif "content" in first_item:
+                return str(first_item["content"])
+            else:
+                return str(first_item)
+        else:
+            return str(first_item)
+    
+    else:
+        return str(result)
+
+def _extract_text_from_nested_content(text_content: str) -> str:
+    """
+    Extract clean text from potentially nested JSON content.
+    """
+    if not isinstance(text_content, str):
+        return str(text_content)
+    
+    # Check if it looks like a JSON string
+    text_content = text_content.strip()
+    if (text_content.startswith('[') and text_content.endswith(']')) or \
+       (text_content.startswith('{') and text_content.endswith('}')):
+        try:
+            parsed_content = json.loads(text_content)
+            if isinstance(parsed_content, list) and len(parsed_content) > 0:
+                first_item = parsed_content[0]
+                if isinstance(first_item, dict) and "text" in first_item:
+                    return first_item["text"]
+                else:
+                    return str(first_item)
+            elif isinstance(parsed_content, dict) and "text" in parsed_content:
+                return parsed_content["text"]
+            else:
+                return str(parsed_content)
+        except (json.JSONDecodeError, ValueError):
+            # If parsing fails, return the original content
+            pass
+    
+    return text_content
 
 # Database functions are now handled by database.py service
 
@@ -129,21 +189,7 @@ async def chat_with_agent(request: ChatRequest):
         })
         
         # Handle response format
-        if isinstance(result, dict) and "output" in result:
-            response_text = result["output"]
-        elif isinstance(result, list) and len(result) > 0:
-            first_item = result[0]
-            if isinstance(first_item, dict):
-                if "text" in first_item:
-                    response_text = first_item["text"]
-                elif "content" in first_item:
-                    response_text = first_item["content"]
-                else:
-                    response_text = str(first_item)
-            else:
-                response_text = str(first_item)
-        else:
-            response_text = str(result)
+        response_text = clean_agent_response(result)
         
         # Ensure response is string
         if not isinstance(response_text, str):
