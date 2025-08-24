@@ -11,7 +11,7 @@ from config import DEFAULT_USER_ID, DOC_CACHE, WATCHLIST_API_URL, PORTFOLIO_API_
 from models import (
     AddPortfolioInput, RemovePortfolioInput, ListPortfolioInput, GetPortfolioSummaryInput,
     AddWatchlistInput, RemoveWatchlistInput, ListWatchlistInput, GetWatchlistEntryInput,
-    WebSearchInput
+    WebSearchInput, StressTestInput
 )
 
 # ====== Portfolio Tools ======
@@ -703,6 +703,120 @@ def web_search(query: str, result_filter: str = "web", search_lang: str = "en_US
         print(f"[LOG] Unexpected error: {str(e)}")
         return {"ok": False, "error": f"Unexpected error during web search: {str(e)}"}
 
+# ====== Stress Test Tool ======
+@tool("stress_test", args_schema=StressTestInput)
+def stress_test(target_url: str, num_requests: int = 10, timeout_seconds: int = 5):
+    """Perform a simple stress test by sending multiple concurrent HTTP requests to a target URL."""
+    try:
+        print(f"[LOG] stress_test called with target_url={target_url}, num_requests={num_requests}, timeout_seconds={timeout_seconds}")
+        
+        # Validate inputs
+        if not target_url or not target_url.strip():
+            return {"ok": False, "error": "Target URL cannot be empty"}
+        
+        if not target_url.startswith(('http://', 'https://')):
+            return {"ok": False, "error": "Target URL must start with http:// or https://"}
+        
+        target_url = target_url.strip()
+        
+        print(f"[LOG] Starting stress test with {num_requests} requests to {target_url}")
+        
+        import concurrent.futures
+        import time
+        
+        results = {
+            "successful": 0,
+            "failed": 0,
+            "total_time": 0,
+            "avg_response_time": 0,
+            "status_codes": {},
+            "errors": []
+        }
+        
+        start_time = time.time()
+        
+        def make_request():
+            try:
+                response = requests.get(target_url, timeout=timeout_seconds)
+                return {
+                    "status_code": response.status_code,
+                    "response_time": response.elapsed.total_seconds(),
+                    "success": True
+                }
+            except requests.exceptions.Timeout:
+                return {
+                    "status_code": None,
+                    "response_time": timeout_seconds,
+                    "success": False,
+                    "error": "Timeout"
+                }
+            except requests.exceptions.ConnectionError:
+                return {
+                    "status_code": None,
+                    "response_time": 0,
+                    "success": False,
+                    "error": "Connection Error"
+                }
+            except Exception as e:
+                return {
+                    "status_code": None,
+                    "response_time": 0,
+                    "success": False,
+                    "error": str(e)
+                }
+        
+        # Use ThreadPoolExecutor for concurrent requests
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(num_requests, 20)) as executor:
+            # Submit all requests
+            future_to_request = {executor.submit(make_request): i for i in range(num_requests)}
+            
+            # Collect results as they complete
+            response_times = []
+            for future in concurrent.futures.as_completed(future_to_request):
+                result = future.result()
+                
+                if result["success"]:
+                    results["successful"] += 1
+                    response_times.append(result["response_time"])
+                    
+                    # Track status codes
+                    status_code = result["status_code"]
+                    results["status_codes"][status_code] = results["status_codes"].get(status_code, 0) + 1
+                else:
+                    results["failed"] += 1
+                    results["errors"].append(result["error"])
+        
+        total_time = time.time() - start_time
+        results["total_time"] = total_time
+        
+        if response_times:
+            results["avg_response_time"] = sum(response_times) / len(response_times)
+        
+        # Calculate success rate
+        success_rate = (results["successful"] / num_requests) * 100 if num_requests > 0 else 0
+        
+        print(f"[LOG] Stress test completed: {results['successful']}/{num_requests} successful ({success_rate:.1f}%)")
+        
+        return {
+            "ok": True,
+            "message": f"Stress test completed for {target_url}",
+            "results": {
+                "target_url": target_url,
+                "total_requests": num_requests,
+                "successful_requests": results["successful"],
+                "failed_requests": results["failed"],
+                "success_rate_percent": round(success_rate, 1),
+                "total_test_time_seconds": round(total_time, 2),
+                "average_response_time_seconds": round(results["avg_response_time"], 3),
+                "status_code_distribution": results["status_codes"],
+                "common_errors": list(set(results["errors"])) if results["errors"] else []
+            }
+        }
+        
+    except Exception as e:
+        print(f"[LOG] Unexpected error during stress test: {str(e)}")
+        return {"ok": False, "error": f"Unexpected error during stress test: {str(e)}"}
+
 # ====== Tool List ======
 TOOLS = [
     add_to_portfolio,
@@ -714,4 +828,5 @@ TOOLS = [
     list_watchlist,
     get_watchlist_entry,
     web_search,
+    stress_test,
 ]

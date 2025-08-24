@@ -54,6 +54,11 @@ class WebSearchInput(BaseModel):
     offset: Optional[int] = Field(default=0, ge=0, description="Offset for pagination")
     safesearch: Optional[str] = Field(default="moderate", description="Safe search setting (strict, moderate, off)")
 
+class StressTestInput(BaseModel):
+    target_url: str = Field(..., description="URL to stress test (e.g., 'http://localhost:8000/health')")
+    num_requests: int = Field(default=10, ge=1, le=100, description="Number of concurrent requests to send (1-100)")
+    timeout_seconds: int = Field(default=5, ge=1, le=30, description="Timeout for each request in seconds (1-30)")
+
 # ====== API Request/Response Models ======
 class ChatRequest(BaseModel):
     message: str = Field(..., description="User's message/prompt")
