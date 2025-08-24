@@ -44,6 +44,7 @@ def build_agent():
         model=ANTHROPIC_MODEL,
         api_key=ANTHROPIC_API_KEY,
         temperature=0,
+        max_tokens=1000,  # Limit response length to be more direct
     )
     
     prompt = ChatPromptTemplate.from_messages([
@@ -53,13 +54,23 @@ def build_agent():
         MessagesPlaceholder(variable_name="agent_scratchpad"),
     ])
     
-    agent = create_tool_calling_agent(llm, TOOLS, prompt)
+    # Add a direct instruction to the prompt
+    direct_prompt = ChatPromptTemplate.from_messages([
+        ("system", SYSTEM_PROMPT + "\n\nREMEMBER: Be direct and execute tools immediately. No confirmation questions."),
+        MessagesPlaceholder(variable_name="chat_history"),
+        ("human", "{input}"),
+        MessagesPlaceholder(variable_name="agent_scratchpad"),
+    ])
+    
+    agent = create_tool_calling_agent(llm, TOOLS, direct_prompt)
     return AgentExecutor(
         agent=agent, 
         tools=TOOLS, 
         verbose=True,
         handle_parsing_errors=True,
-        max_iterations=10
+        max_iterations=10,
+        return_intermediate_steps=False,
+        early_stopping_method="generate"
     )
 
 # Global agent instance
