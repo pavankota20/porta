@@ -323,15 +323,41 @@ async def chat_with_agent(request: ChatRequest):
         # Create enhanced history that includes the current user message
         enhanced_history = history + [{"role": "user", "content": request.message}]
         
+        # Pre-load user preferences to avoid fetching them on every message
+        user_preferences = None
+        try:
+            from config import AUTO_LOAD_USER_PREFERENCES
+            if AUTO_LOAD_USER_PREFERENCES:
+                from tools import get_user_preferences
+                prefs_result = get_user_preferences(request.user_id)
+                if prefs_result.get('ok'):
+                    user_preferences = prefs_result.get('preferences')
+                    print(f"[DEBUG] Pre-loaded user preferences for {request.user_id}")
+                else:
+                    print(f"[DEBUG] No user preferences found for {request.user_id}")
+            else:
+                print(f"[DEBUG] Auto-loading user preferences disabled")
+        except Exception as e:
+            print(f"[DEBUG] Could not pre-load user preferences: {str(e)}")
+        
         # Invoke agent with full conversation context
         print(f"[DEBUG] Invoking agent with input: {request.message}")
         print(f"[DEBUG] Chat history length: {len(enhanced_history)}")
+        print(f"[DEBUG] User preferences loaded: {user_preferences is not None}")
         
         try:
-            result = agent.invoke({
+            # Prepare agent input with user preferences
+            agent_input = {
                 "input": request.message,
                 "chat_history": enhanced_history
-            })
+            }
+            
+            # Add user preferences to agent input if available
+            if user_preferences:
+                agent_input["user_preferences"] = user_preferences
+                print(f"[DEBUG] Added user preferences to agent input")
+            
+            result = agent.invoke(agent_input)
             print(f"[DEBUG] Agent invocation successful, result type: {type(result)}")
         except Exception as e:
             print(f"[ERROR] Agent invocation failed: {str(e)}")

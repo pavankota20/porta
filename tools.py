@@ -3,15 +3,16 @@
 Simple sync LangChain tools for Porta Finance Assistant
 """
 
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from langchain.tools import tool # type: ignore
 import requests
 
-from config import DEFAULT_USER_ID, DOC_CACHE, WATCHLIST_API_URL, PORTFOLIO_API_URL, WEB_SEARCH_API_URL
+from config import DEFAULT_USER_ID, DOC_CACHE, WATCHLIST_API_URL, PORTFOLIO_API_URL, WEB_SEARCH_API_URL, USER_PREFERENCES_API_URL, USER_INTERACTIONS_API_URL, PREFERENCE_HISTORY_API_URL
 from models import (
     AddPortfolioInput, RemovePortfolioInput, ListPortfolioInput, GetPortfolioSummaryInput,
     AddWatchlistInput, RemoveWatchlistInput, ListWatchlistInput, GetWatchlistEntryInput,
-    WebSearchInput, StressTestInput
+    WebSearchInput, StressTestInput, UserPreferencesInput, GetUserPreferencesInput, 
+    ListUserPreferencesInput, UserInteractionInput, GetUserInteractionsInput, GetPreferenceHistoryInput
 )
 
 # ====== Portfolio Tools ======
@@ -817,6 +818,382 @@ def stress_test(target_url: str, num_requests: int = 10, timeout_seconds: int = 
         print(f"[LOG] Unexpected error during stress test: {str(e)}")
         return {"ok": False, "error": f"Unexpected error during stress test: {str(e)}"}
 
+# ====== User Preferences Tools ======
+@tool("get_user_preferences", args_schema=GetUserPreferencesInput)
+def get_user_preferences(user_id: str):
+    """Get user preferences by user ID from the external user preferences API."""
+    try:
+        print(f"[LOG] get_user_preferences called with user_id={user_id}")
+        
+        if not user_id or not user_id.strip():
+            return {"ok": False, "error": "User ID cannot be empty"}
+        
+        user_id = user_id.strip()
+        
+        print(f"[LOG] Making API request to get user preferences for user {user_id}")
+        
+        # Make HTTP request to the user preferences API
+        api_url = f"{USER_PREFERENCES_API_URL}{user_id}"
+        
+        response = requests.get(api_url, timeout=10)
+        print(f"[LOG] API response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"[LOG] API response success: {result}")
+            return {
+                "ok": True,
+                "preferences": result,
+                "user_id": user_id
+            }
+        elif response.status_code == 404:
+            return {"ok": False, "error": "User preferences not found"}
+        else:
+            print(f"[LOG] API response failed with status {response.status_code}")
+            try:
+                error_detail = response.json()
+                return {"ok": False, "error": f"User preferences API error: {error_detail.get('detail', 'Unknown error')}"}
+            except:
+                return {"ok": False, "error": f"Unable to retrieve user preferences (HTTP {response.status_code})"}
+        
+    except requests.exceptions.ConnectionError:
+        print(f"[LOG] Connection error to API")
+        return {"ok": False, "error": "Unable to connect to user preferences service. Please check if the service is running."}
+    except requests.exceptions.Timeout:
+        print(f"[LOG] Timeout error to API")
+        return {"ok": False, "error": "User preferences service request timed out. Please try again."}
+    except Exception as e:
+        print(f"[LOG] Unexpected error: {str(e)}")
+        return {"ok": False, "error": f"Unexpected error retrieving user preferences: {str(e)}"}
+
+@tool("create_user_preferences", args_schema=UserPreferencesInput)
+def create_user_preferences(user_id: str, experience_level: Optional[str] = None, 
+                           investment_style: Optional[str] = None, risk_tolerance: Optional[str] = None,
+                           communication_style: Optional[str] = None, preferred_sectors: Optional[List[str]] = None,
+                           investment_goals: Optional[List[str]] = None, preferred_timeframe: Optional[str] = None,
+                           preferred_asset_classes: Optional[List[str]] = None, language: Optional[str] = None,
+                           currency: Optional[str] = None, timezone: Optional[str] = None):
+    """Create new user preferences by calling the external user preferences API."""
+    try:
+        print(f"[LOG] create_user_preferences called with user_id={user_id}")
+        
+        if not user_id or not user_id.strip():
+            return {"ok": False, "error": "User ID cannot be empty"}
+        
+        user_id = user_id.strip()
+        
+        # Build payload with only provided values
+        payload = {"user_id": user_id}
+        if experience_level:
+            payload["experience_level"] = experience_level
+        if investment_style:
+            payload["investment_style"] = investment_style
+        if risk_tolerance:
+            payload["risk_tolerance"] = risk_tolerance
+        if communication_style:
+            payload["communication_style"] = communication_style
+        if preferred_sectors:
+            payload["preferred_sectors"] = preferred_sectors
+        if investment_goals:
+            payload["investment_goals"] = investment_goals
+        if preferred_timeframe:
+            payload["preferred_timeframe"] = preferred_timeframe
+        if preferred_asset_classes:
+            payload["preferred_asset_classes"] = preferred_asset_classes
+        if language:
+            payload["language"] = language
+        if currency:
+            payload["currency"] = currency
+        if timezone:
+            payload["timezone"] = timezone
+        
+        print(f"[LOG] Making API request to create user preferences for user {user_id}")
+        print(f"[LOG] API payload: {payload}")
+        
+        # Make HTTP request to the user preferences API
+        response = requests.post(USER_PREFERENCES_API_URL, json=payload, 
+                               headers={"Content-Type": "application/json"}, timeout=10)
+        print(f"[LOG] API response status: {response.status_code}")
+        
+        if response.status_code in [200, 201]:
+            result = response.json()
+            print(f"[LOG] API response success: {result}")
+            return {
+                "ok": True,
+                "message": "Successfully created user preferences",
+                "preferences": result,
+                "user_id": user_id
+            }
+        elif response.status_code == 400:
+            result = response.json()
+            return {"ok": False, "error": result.get("detail", "Unable to create user preferences")}
+        else:
+            print(f"[LOG] API response unexpected status: {response.status_code}")
+            return {"ok": False, "error": "Unable to create user preferences at this time"}
+        
+    except requests.exceptions.ConnectionError:
+        print(f"[LOG] Connection error to API")
+        return {"ok": False, "error": "Unable to connect to user preferences service. Please check if the service is running."}
+    except requests.exceptions.Timeout:
+        print(f"[LOG] Timeout error to API")
+        return {"ok": False, "error": "User preferences service request timed out. Please try again."}
+    except Exception as e:
+        print(f"[LOG] Unexpected error: {str(e)}")
+        return {"ok": False, "error": f"Unexpected error creating user preferences: {str(e)}"}
+
+@tool("update_user_preferences", args_schema=UserPreferencesInput)
+def update_user_preferences(user_id: str, experience_level: Optional[str] = None, 
+                           investment_style: Optional[str] = None, risk_tolerance: Optional[str] = None,
+                           communication_style: Optional[str] = None, preferred_sectors: Optional[List[str]] = None,
+                           investment_goals: Optional[List[str]] = None, preferred_timeframe: Optional[str] = None,
+                           preferred_asset_classes: Optional[List[str]] = None, language: Optional[str] = None,
+                           currency: Optional[str] = None, timezone: Optional[str] = None):
+    """Update user preferences by calling the external user preferences API."""
+    try:
+        print(f"[LOG] update_user_preferences called with user_id={user_id}")
+        
+        if not user_id or not user_id.strip():
+            return {"ok": False, "error": "User ID cannot be empty"}
+        
+        user_id = user_id.strip()
+        
+        # Build payload with only provided values
+        payload = {}
+        if experience_level:
+            payload["experience_level"] = experience_level
+        if investment_style:
+            payload["investment_style"] = investment_style
+        if risk_tolerance:
+            payload["risk_tolerance"] = risk_tolerance
+        if communication_style:
+            payload["communication_style"] = communication_style
+        if preferred_sectors:
+            payload["preferred_sectors"] = preferred_sectors
+        if investment_goals:
+            payload["investment_goals"] = investment_goals
+        if preferred_timeframe:
+            payload["preferred_timeframe"] = preferred_timeframe
+        if preferred_asset_classes:
+            payload["preferred_asset_classes"] = preferred_asset_classes
+        if language:
+            payload["language"] = language
+        if currency:
+            payload["currency"] = currency
+        if timezone:
+            payload["timezone"] = timezone
+        
+        if not payload:
+            return {"ok": False, "error": "No fields provided for update"}
+        
+        print(f"[LOG] Making API request to update user preferences for user {user_id}")
+        print(f"[LOG] API payload: {payload}")
+        
+        # Make HTTP request to the user preferences API
+        api_url = f"{USER_PREFERENCES_API_URL}{user_id}"
+        response = requests.put(api_url, json=payload, 
+                              headers={"Content-Type": "application/json"}, timeout=10)
+        print(f"[LOG] API response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"[LOG] API response success: {result}")
+            return {
+                "ok": True,
+                "message": "Successfully updated user preferences",
+                "preferences": result,
+                "user_id": user_id
+            }
+        elif response.status_code == 404:
+            return {"ok": False, "error": "User preferences not found"}
+        elif response.status_code == 400:
+            result = response.json()
+            return {"ok": False, "error": result.get("detail", "Unable to update user preferences")}
+        else:
+            print(f"[LOG] API response unexpected status: {response.status_code}")
+            return {"ok": False, "error": "Unable to update user preferences at this time"}
+        
+    except requests.exceptions.ConnectionError:
+        print(f"[LOG] Connection error to API")
+        return {"ok": False, "error": "Unable to connect to user preferences service. Please check if the service is running."}
+    except requests.exceptions.Timeout:
+        print(f"[LOG] Timeout error to API")
+        return {"ok": False, "error": "User preferences service request timed out. Please try again."}
+    except Exception as e:
+        print(f"[LOG] Unexpected error: {str(e)}")
+        return {"ok": False, "error": f"Unexpected error updating user preferences: {str(e)}"}
+
+@tool("record_user_interaction", args_schema=UserInteractionInput)
+def record_user_interaction(user_id: str, interaction_type: str, content: Optional[Dict[str, Any]] = None,
+                           satisfaction_score: Optional[int] = None, metadata: Optional[Dict[str, Any]] = None):
+    """Record a user interaction by calling the external user interactions API."""
+    try:
+        print(f"[LOG] record_user_interaction called with user_id={user_id}, type={interaction_type}")
+        
+        if not user_id or not user_id.strip():
+            return {"ok": False, "error": "User ID cannot be empty"}
+        
+        if not interaction_type or not interaction_type.strip():
+            return {"ok": False, "error": "Interaction type cannot be empty"}
+        
+        user_id = user_id.strip()
+        interaction_type = interaction_type.strip()
+        
+        # Build payload
+        payload = {
+            "user_id": user_id,
+            "interaction_type": interaction_type
+        }
+        if content:
+            payload["content"] = content
+        if satisfaction_score:
+            payload["satisfaction_score"] = satisfaction_score
+        if metadata:
+            payload["metadata"] = metadata
+        
+        print(f"[LOG] Making API request to record user interaction for user {user_id}")
+        print(f"[LOG] API payload: {payload}")
+        
+        # Make HTTP request to the user interactions API
+        response = requests.post(USER_INTERACTIONS_API_URL, json=payload, 
+                               headers={"Content-Type": "application/json"}, timeout=10)
+        print(f"[LOG] API response status: {response.status_code}")
+        
+        if response.status_code in [200, 201]:
+            result = response.json()
+            print(f"[LOG] API response success: {result}")
+            return {
+                "ok": True,
+                "message": "Successfully recorded user interaction",
+                "interaction": result,
+                "user_id": user_id
+            }
+        elif response.status_code == 400:
+            result = response.json()
+            return {"ok": False, "error": result.get("detail", "Unable to record user interaction")}
+        else:
+            print(f"[LOG] API response unexpected status: {response.status_code}")
+            return {"ok": False, "error": "Unable to record user interaction at this time"}
+        
+    except requests.exceptions.ConnectionError:
+        print(f"[LOG] Connection error to API")
+        return {"ok": False, "error": "Unable to connect to user interactions service. Please check if the service is running."}
+    except requests.exceptions.Timeout:
+        print(f"[LOG] Timeout error to API")
+        return {"ok": False, "error": "User interactions service request timed out. Please try again."}
+    except Exception as e:
+        print(f"[LOG] Unexpected error: {str(e)}")
+        return {"ok": False, "error": f"Unexpected error recording user interaction: {str(e)}"}
+
+@tool("get_user_interactions", args_schema=GetUserInteractionsInput)
+def get_user_interactions(user_id: str, page: int = 1, size: int = 10, interaction_type: Optional[str] = None):
+    """Get user interactions for a specific user from the external user interactions API."""
+    try:
+        print(f"[LOG] get_user_interactions called with user_id={user_id}, page={page}, size={size}")
+        
+        if not user_id or not user_id.strip():
+            return {"ok": False, "error": "User ID cannot be empty"}
+        
+        user_id = user_id.strip()
+        
+        # Build query parameters
+        params = {"user_id": user_id, "page": page, "size": size}
+        if interaction_type:
+            params["interaction_type"] = interaction_type
+        
+        print(f"[LOG] Making API request to get user interactions for user {user_id}")
+        
+        # Make HTTP request to the user interactions API
+        api_url = f"{USER_INTERACTIONS_API_URL}user/{user_id}"
+        response = requests.get(api_url, params=params, timeout=10)
+        print(f"[LOG] API response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"[LOG] API response success: {result}")
+            return {
+                "ok": True,
+                "interactions": result.get("interactions", []),
+                "total": result.get("total", 0),
+                "page": result.get("page", page),
+                "size": result.get("size", size),
+                "pages": result.get("pages", 0),
+                "user_id": user_id
+            }
+        elif response.status_code == 404:
+            return {"ok": False, "error": "User interactions not found"}
+        else:
+            print(f"[LOG] API response failed with status {response.status_code}")
+            try:
+                error_detail = response.json()
+                return {"ok": False, "error": f"User interactions API error: {error_detail.get('detail', 'Unknown error')}"}
+            except:
+                return {"ok": False, "error": f"Unable to retrieve user interactions (HTTP {response.status_code})"}
+        
+    except requests.exceptions.ConnectionError:
+        print(f"[LOG] Connection error to API")
+        return {"ok": False, "error": "Unable to connect to user interactions service. Please check if the service is running."}
+    except requests.exceptions.Timeout:
+        print(f"[LOG] Timeout error to API")
+        return {"ok": False, "error": "User interactions service request timed out. Please try again."}
+    except Exception as e:
+        print(f"[LOG] Unexpected error: {str(e)}")
+        return {"ok": False, "error": f"Unexpected error retrieving user interactions: {str(e)}"}
+
+@tool("get_preference_history", args_schema=GetPreferenceHistoryInput)
+def get_preference_history(user_id: str, page: int = 1, size: int = 10, field_name: Optional[str] = None):
+    """Get preference history for a specific user from the external preference history API."""
+    try:
+        print(f"[LOG] get_preference_history called with user_id={user_id}, page={page}, size={size}")
+        
+        if not user_id or not user_id.strip():
+            return {"ok": False, "error": "User ID cannot be empty"}
+        
+        user_id = user_id.strip()
+        
+        # Build query parameters
+        params = {"user_id": user_id, "page": page, "size": size}
+        if field_name:
+            params["field_name"] = field_name
+        
+        print(f"[LOG] Making API request to get preference history for user {user_id}")
+        
+        # Make HTTP request to the preference history API
+        api_url = f"{PREFERENCE_HISTORY_API_URL}user/{user_id}"
+        response = requests.get(api_url, params=params, timeout=10)
+        print(f"[LOG] API response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"[LOG] API response success: {result}")
+            return {
+                "ok": True,
+                "history": result.get("history", []),
+                "total": result.get("total", 0),
+                "page": result.get("page", page),
+                "size": result.get("size", size),
+                "pages": result.get("pages", 0),
+                "user_id": user_id
+            }
+        elif response.status_code == 404:
+            return {"ok": False, "error": "Preference history not found"}
+        else:
+            print(f"[LOG] API response failed with status {response.status_code}")
+            try:
+                error_detail = response.json()
+                return {"ok": False, "error": f"Preference history API error: {error_detail.get('detail', 'Unknown error')}"}
+            except:
+                return {"ok": False, "error": f"Unable to retrieve preference history (HTTP {response.status_code})"}
+        
+    except requests.exceptions.ConnectionError:
+        print(f"[LOG] Connection error to API")
+        return {"ok": False, "error": "Unable to connect to preference history service. Please check if the service is running."}
+    except requests.exceptions.Timeout:
+        print(f"[LOG] Timeout error to API")
+        return {"ok": False, "error": "Preference history service request timed out. Please try again."}
+    except Exception as e:
+        print(f"[LOG] Unexpected error: {str(e)}")
+        return {"ok": False, "error": f"Unexpected error retrieving preference history: {str(e)}"}
+
 # ====== Tool List ======
 TOOLS = [
     add_to_portfolio,
@@ -829,4 +1206,10 @@ TOOLS = [
     get_watchlist_entry,
     web_search,
     stress_test,
+    get_user_preferences,
+    create_user_preferences,
+    update_user_preferences,
+    record_user_interaction,
+    get_user_interactions,
+    get_preference_history,
 ]

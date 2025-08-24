@@ -29,6 +29,13 @@ Porta Finance Assistant is an intelligent financial management system that combi
 - **Intelligent Responses**: AI understands complex queries and provides helpful suggestions
 - **Multi-step Operations**: Execute complex tasks with single requests
 
+### 🎯 **User Preferences & Personalization**
+- **Investment Profile**: Stores user experience level, risk tolerance, and investment style
+- **Communication Preferences**: Adapts responses based on user's preferred communication style
+- **Sector Preferences**: Tracks preferred investment sectors and asset classes
+- **Interaction History**: Monitors user engagement and satisfaction for continuous improvement
+- **Preference Evolution**: Maintains audit trail of preference changes over time
+
 ## 🏗️ Architecture
 
 ### **Backend Stack**
@@ -174,6 +181,14 @@ Agent: ✅ Lists portfolio → Searches each ticker → Provides comprehensive a
 
 ### **Research Tools**
 - `web_search` - Multi-source web search with filters
+
+### **User Preferences Tools**
+- `get_user_preferences` - Retrieve user's investment preferences and settings
+- `create_user_preferences` - Create new user preferences profile
+- `update_user_preferences` - Update existing user preferences
+- `record_user_interaction` - Track user interactions and satisfaction
+- `get_user_interactions` - View user's interaction history
+- `get_preference_history` - See how user preferences have changed over time
 
 ## 🔧 Configuration Options
 
